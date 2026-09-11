@@ -1,0 +1,93 @@
+[project]
+name = "motor"
+version = "0.1.0"
+description = "Motor de decisão de compra para supermercados"
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "polars==1.44.2",
+    "numpy==2.5.3",
+    "pyarrow==25.0.1",
+    "pydantic==2.13.5",
+    "pyyaml==6.0.3",
+    "scikit-learn==1.9.0",
+    "lightgbm==4.7.0",
+    "matplotlib==3.11.1",
+    "xlsxwriter==3.2.9",
+]
+
+[dependency-groups]
+dev = [
+    "pytest==9.1.1",
+    "pytest-cov==7.1.0",
+    "ruff==0.16.6",
+    "mypy==2.3.1",
+    "types-PyYAML==6.0.12.20260906",
+    "jupyterlab==4.6.3",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/motor"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle
+    "F",   # pyflakes
+    "I",   # isort
+    "N",   # pep8-naming
+    "UP",  # pyupgrade
+    "B",   # flake8-bugbear
+    "SIM", # flake8-simplify
+    "ARG", # flake8-unused-arguments
+    "PTH", # flake8-use-pathlib
+    "C4",  # flake8-comprehensions
+    "PL",  # pylint
+    "TID", # flake8-tidy-imports (usado para banir pandas)
+    "RUF", # regras próprias do ruff
+]
+ignore = [
+    "PLR0913", # muitos argumentos de função é comum em código de dados
+    "PLR2004", # constante mágica em comparação é excessivo para este projeto
+]
+
+[tool.ruff.lint.flake8-tidy-imports.banned-api]
+"pandas".msg = "Projeto usa polars por decisão do CLAUDE.md (seção 2). pandas só entra numa fronteira legítima, liberada via per-file-ignores, nunca globalmente."
+
+[tool.ruff.format]
+quote-style = "double"
+
+[tool.mypy]
+strict = true
+python_version = "3.12"
+files = ["src"]
+
+[[tool.mypy.overrides]]
+module = "lightgbm.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "sklearn.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "matplotlib.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "xlsxwriter.*"
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "--strict-markers --strict-config --cov=motor --cov-report=term-missing"
+
+[tool.coverage.run]
+source = ["src/motor"]

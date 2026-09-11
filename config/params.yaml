@@ -1,0 +1,264 @@
+# Todas as premissas numéricas do projeto. Nenhum número mágico vive no
+# código (CLAUDE.md, seção 2) -- ele vive aqui, comentado, para que a lista
+# de premissas assumidas da Sprint 17 não precise ser reconstruída na unha.
+#
+# Todo valor marcado "arbitrado" é um chute plausível, não uma medida do
+# negócio real. Cada um desses precisa ser revisto com o cliente antes do
+# relatório final.
+
+data:
+  raw_dir: data/raw/favorita # decidido na Sprint 2: layout real do dataset Favorita bruto
+  raw_parquet_dir: data/raw_parquet/favorita # decidido na Sprint 2: parquet bruto, sem transformação (motor.io.raw)
+  canonical_dir: data/canonical/favorita # decidido na Sprint 3: layout real de saída de motor.io.loaders
+  start_date: 2013-01-01 # cobertura do dataset público Favorita
+  end_date: 2017-08-15 # idem
+
+profiling:
+  # Duas janelas candidatas para a Sprint 4 escolher o subconjunto de trabalho.
+  # Nenhuma é "a" janela -- o ponto é tornar visível, em número, o trade-off
+  # entre as duas (CLAUDE.md seção 8: decisão de modelagem que muda resultado
+  # financeiro para, aqui, resultado de seleção -- não escolho sozinho).
+  windows:
+    # medido (profile_promo_availability contra o dado real, Sprint 2): onpromotion
+    # é 100% nulo até 2014-03 e cai para 0% nulo a partir de 2014-04-01, sem mês de
+    # transição parcial -- as duas janelas abaixo já têm promoção 100% utilizável.
+    # O que as diferencia de fato não é mais promoção, e sim o terremoto do Equador
+    # de 16/04/2016 (a documentação do dataset registra distorção de vendas por
+    # várias semanas): a janela de 12 meses o evita inteiramente, a de 24 meses o
+    # inclui em troca de mais histórico.
+    - name: ultimos_12_meses
+      start: 2016-08-16
+      end: 2017-08-15
+    - name: ultimos_24_meses
+      start: 2015-08-16
+      end: 2017-08-15
+  density_cuts: [0.5, 0.6, 0.7, 0.8, 0.9, 0.95] # arbitrado: grade de corte para count_candidates
+
+subset_selection:
+  # Sprint 4, Fase A -- todo valor abaixo vem do relatório de medição (M1-M7),
+  # não de arbitragem. D1-D8 se referem às decisões desse relatório.
+  store_id: "44" # D1, medido: maior volume (33,1M un. vs. mediana 8,9M), histórico
+    # cobre a janela inteira, 0,55% dias não-operacionais, tipo A (segmento com
+    # 9 lojas -- não é um caso único do dataset)
+  n_stores: 1 # uma loja, conforme CLAUDE.md seção 9 (Sprint 0)
+  n_items_min: 150 # piso do intervalo pedido no CLAUDE.md
+  n_items_max: 300 # teto do intervalo pedido no CLAUDE.md
+  min_weeks_of_history: 52 # usado para derivar simulation.start_date (D2) e o fim de density_window (D3)
+  # D3: fatia em que densidade é medida -- estritamente ANTES de simulation.start_date,
+  # nunca o período avaliado (contrato fixo da função `select_subset`, não argumento).
+  # density_window_start = canonical.window_start; density_window_end = simulation.start_date - 1 dia
+  # (= canonical.window_start + min_weeks_of_history*7 dias - 1).
+  density_window_start: 2015-08-16
+  density_window_end: 2016-08-13
+  density_threshold: 0.9 # D3, medido (M2): piso que separa demanda regular de intermitente nesta loja
+  promo_days_max_share: 0.5 # D6, medido (M6): só 6 itens cruzam esse piso -- item dominado por promoção, excluído
+  family_min_items: 3 # D6, medido (M5): abaixo disso, fornecedor com <=2 itens degenera a regra de pedido mínimo
+  family_cap: 20 # D5 ⚠️ decidido, não medido: cap por família -- gera N final ~260-280 (dentro de 150-300)
+
+simulation:
+  warmup_days: 90 # arbitrado: ~3 meses para o estoque inicial deixar de contaminar a métrica
+  # Corrigido na Sprint 4 (D2): os valores antigos (start_date=2013-04-01) são de
+  # antes do Sprint 3 recortar o canônico para a janela de 24 meses abaixo -- não
+  # existe dado antes de canonical.window_start (2015-08-16). start_date agora é
+  # derivado: canonical.window_start + min_weeks_of_history*7 dias (364, o
+  # histórico mínimo de treino do forecaster) = onde o LOOP do simulador começa.
+  start_date: 2016-08-14
+  # evaluation_start_date = start_date + warmup_days (90) -- só a partir daqui a
+  # métrica financeira conta (CLAUDE.md seção 6: warmup é simulado, não medido).
+  # Restam (canonical.window_end - evaluation_start_date) = 277 dias (~9 meses)
+  # de fato avaliados.
+  evaluation_start_date: 2016-11-12
+  end_date: 2017-08-15 # = canonical.window_end
+  seed: 42 # arbitrado: qualquer inteiro fixo serve, o que importa é ser fixo
+
+forecast_naive:
+  # Sprint 7: motor.forecast.naive.NaiveForecaster. moving_average_weeks é
+  # compartilhado com motor.policy.erp_baseline.ErpBaselinePolicy (ver
+  # comentário no topo de erp_baseline.py) -- não é calibrado, é fixado pelo
+  # enunciado da sprint ("média das últimas 4 semanas").
+  moving_average_weeks: 4
+  min_residual_samples: 8 # arbitrado: piso para o backtest de resíduos não degenerar com poucas amostras
+
+erp_baseline:
+  # Sprint 7: motor.policy.erp_baseline.ErpBaselinePolicy. Calibração medida
+  # sobre dado real (não chutada) -- critério, grade e decisão registrados
+  # por escrito abaixo, conforme pedido no enunciado da sprint.
+  #
+  # CRITÉRIO (aprovado na revisão, não escolhido sozinho -- CLAUDE.md seção
+  # 10): nível de serviço = fill rate agregada (sum(sold)/sum(demand) sobre
+  # todo o subconjunto, medida só no período pós-warmup) >= 95%. Entre as
+  # configurações que atingem a meta, escolhe a de menor estoque médio
+  # agregado (avg_on_hand); se nenhuma atingisse, escolheria a de maior fill
+  # rate e marcaria target_met=False -- não foi o caso aqui.
+  #
+  # JANELA DE CALIBRAÇÃO: subset_selection.density_window_start..end
+  # (2015-08-16 a 2016-08-13) -- termina exatamente onde simulation.start_date
+  # começa, sem overlap com o período avaliado pelos braços de verdade.
+  # warmup_days (90, igual ao dos braços) descartado da leitura da métrica.
+  #
+  # GRADE ORIGINAL (aprovada na revisão): factor em [1.0..2.0] passo 0.1,
+  # min_order_units em [0,1,3,5,10] (275 itens do subconjunto real, loja 44).
+  # RESULTADO: platô integral -- a borda inferior (factor=1.0) já batia
+  # fill_rate=99.63%, a borda superior (factor=2.0) batia 99.86%. A escolha
+  # caía sempre na borda inferior só porque a grade nunca alcançou o ponto
+  # onde o nível de serviço cai abaixo da meta -- não é calibração de
+  # verdade, é o teto da grade (achado no CHECK do ajuste 2 da revisão).
+  # Grade ampliada pra baixo por decisão da revisão, não escolha própria.
+  #
+  # GRADE FINAL: factor em [0.1, 0.2, 0.28, 0.30, 0.32, 0.34, 0.36, 0.38,
+  # 0.40, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0, 1.1, ..., 2.0] -- passo 0.02 entre
+  # 0.28 e 0.40 (onde a curva cruza a meta), passo 0.1 no resto; mesma grade
+  # de min_order_units. Não refinada além de passo 0.02: o ganho de precisão
+  # é menor que a incerteza das premissas arbitradas (estoque inicial,
+  # ausência de shelf life) -- refinar mais seria falsa precisão.
+  #
+  # ESCOLHIDO: factor=0.34 (fill_rate=95.98%, avg_on_hand=129.75 unidades
+  # agregadas, pós-warmup). Vizinhas na grade: factor=0.32 (fill_rate=94.44%,
+  # abaixo da meta) e factor=0.36 (fill_rate=97.01%, acima, com mais
+  # estoque). O ótimo fica no MEIO da grade ampliada, não numa borda; a curva
+  # sobe ~1.3-1.5 p.p. de fill_rate a cada passo de 0.02 nessa faixa -- não
+  # está plana. Confirma que a grade final está bem posicionada.
+  #
+  # MIN_ORDER_UNITS: varrido em [0,1,3,5,10] em toda a grade de factor, sem
+  # efeito mensurável -- fill_rate e avg_on_hand empatam em 4 casas decimais
+  # em cada ponto de factor, para os 5 valores de min_order_units. CHECK 1 da
+  # revisão: em vez de aceitar isso como coincidência, instrumentei uma
+  # rodada real (factor=0.34, min_order_units=10, todo o subconjunto, janela
+  # pós-warmup) contando ativações do piso decisão a decisão. Resultado: o
+  # piso ATIVOU 22 vezes em 10.668 decisões com pedido bruto > 0 (~0.2%) --
+  # não é bug de propagação (um bug de propagação daria zero ativações, não
+  # 22). É que a mediana de pedido bruto nessas decisões é ~114 unidades
+  # (p10=45, p90=430), contra um piso testado de no máximo 10 -- o piso quase
+  # nunca morde nesta escala de demanda. Fixado em 0.0: não há evidência
+  # medida que justifique um valor > 0; um piso "de bom senso" sem essa
+  # medição teria sido exatamente o número mágico que a sprint pediu pra
+  # evitar.
+  factor: 0.34
+  min_order_units: 0.0
+
+  # CHECK 2 da revisão -- o que factor=0.34 significa em dias de cobertura:
+  # factor(0.34) x forecast_naive.moving_average_weeks(4) x 7 dias = 9,52
+  # dias de cobertura-alvo. lead_time_days e review_period_days do
+  # subconjunto real são 3 e 7 -- uniformes nos 16 fornecedores do
+  # subconjunto (confirmado, não assumido) porque vêm do default de
+  # supplier_assumptions, não de um calendário de fornecedor medido (o
+  # Favorita não tem esse dado) -- logo L+R = 10 dias, não 11. Razão
+  # cobertura/(L+R) = 9,52/10 = 0,952: o baseline calibrado converge pra
+  # PERTO da própria janela de risco, não erra a cobertura por uma margem
+  # grande.
+  #
+  # LIMITAÇÃO/CONTEXTO DO RESULTADO, não detalhe de implementação: como o
+  # baseline calibrado já cobre quase toda a janela de risco em dias, o
+  # ganho esperado dos braços 2 e 3 sobre este baseline NÃO deve vir de
+  # "corrigir uma cobertura errada em dias" -- o baseline não erra isso de
+  # forma grosseira nesta calibração. Tem que vir de onde o baseline é
+  # estruturalmente cego: reagir à FORMA da distribuição de demanda (previsão
+  # quantílica por item, em vez de um fator plano igual pra toda a base) e
+  # das regras de guarda. Se os braços futuros não superarem este baseline, a
+  # pergunta certa é se a previsão quantílica está de fato capturando risco
+  # que a média móvel não vê -- não se este baseline está artificialmente
+  # ruim.
+
+supplier_assumptions:
+  default_pack_multiple: 1.0 # arbitrado: sem fardo conhecido, assume unidade avulsa
+  default_lead_time_days: 3 # arbitrado: prazo comum de fornecedor de mercearia local
+  default_review_period_days: 7 # arbitrado: revisão semanal como piso, ver Supplier.review_period_days
+  default_min_order_value: 0.0 # arbitrado: sem pedido mínimo conhecido, não restringe
+  default_min_order_units: 0.0 # arbitrado (Sprint 10): sem mínimo em unidades conhecido, não restringe
+  default_order_weekdays: [1, 2, 3, 4, 5] # arbitrado: sem calendário real de fornecedor, assume todo dia útil (Sprint 3, D8)
+
+supplier_order_policy:
+  # Sprint 10: motor.policy.supplier.apply_supplier_constraints. Teto GLOBAL
+  # (somado sobre todos os itens do fornecedor, não por item) de fardos
+  # adicionais no preenchimento até o pedido mínimo -- estourar o teto sem
+  # atingir o mínimo adia o pedido inteiro (MINIMO_INATINGIVEL).
+  max_additional_packs_for_minimum: 10 # arbitrado: piso plausível antes de considerar o mínimo inatingível
+
+economics:
+  capital_cost_annual: 0.15 # arbitrado: custo de capital anualizado plausível para varejo pequeno/médio no Brasil
+  # Sprint 8: preço único por unidade vendida, aplicado a TODO item -- o Favorita não
+  # tem preço em nenhuma linha do bruto, e margem percentual sozinha não converte pra
+  # R$. A escala deste número é PROVADAMENTE irrelevante pra métrica ordenadora e pro
+  # giro (motor.metrics.financial, docstring do módulo, tem a prova algébrica -- price
+  # cancela porque é uniforme entre itens) -- só o tamanho dos R$ absolutos reportados
+  # (margem_realizada_rs, capital_medio_rs) escala com ele. NUNCA leia esses dois como
+  # valor monetário real -- só as razões (decision_metric, giro_anualizado) importam.
+  # Ver "Limitações" na docstring de motor.metrics.financial para o que essa escolha
+  # esconde (distorção de ordenação POR ITEM, equivalência kg/unidade).
+  uniform_unit_price: 10.00
+  default_margin_pct: 0.25 # arbitrado: fallback para categoria não mapeada em category_margin_pct
+  category_margin_pct:
+    # Margem por categoria REAL do Favorita (Sprint 8) -- chaves trocadas das buckets
+    # genéricas (hortifruti/mercearia/bebidas/limpeza) pelos valores reais de
+    # Item.category no subconjunto de trabalho (16 categorias, loja 44). Só a linha
+    # GROCERY I/II vem do documento de negócio (mercearia seca, faixa 15-22%, ponto
+    # médio) -- todo o resto é ARBITRADO POR ANALOGIA com varejo brasileiro, sem
+    # medição nenhuma. Escrito assim de propósito, sem suavizar (revisão da Sprint 8).
+    #
+    # Item âncora (arroz, leite, açúcar, refrigerante -- faixa <8% no documento de
+    # negócio) NÃO está separado aqui: Item.is_anchor é 100% nulo no canônico, e o
+    # Sprint 3 decidiu explicitamente não inventar um proxy (por volume, por exemplo)
+    # que atribuiria significado de negócio que o dado não carrega. Adiado pra quando
+    # is_anchor tiver um consumidor real (Sprint 13) -- ver limitação na docstring de
+    # motor.metrics.financial.
+    "GROCERY I": 0.18 # documento de negócio: mercearia seca, faixa 15-22%, ponto médio
+    "GROCERY II": 0.18 # idem
+    MEATS: 0.14 # arbitrado por analogia -- proteína crua, menor margem típica do varejo BR
+    POULTRY: 0.14 # idem
+    SEAFOOD: 0.14 # idem
+    DAIRY: 0.17 # arbitrado por analogia
+    EGGS: 0.17 # idem
+    DELI: 0.22 # arbitrado por analogia -- frios/processados, margem intermediária
+    PRODUCE: 0.20 # arbitrado (valor já usado antes da Sprint 8, mantido)
+    "BREAD/BAKERY": 0.32 # arbitrado por analogia -- padaria própria, margem alta típica
+    "FROZEN FOODS": 0.26 # arbitrado por analogia
+    BEVERAGES: 0.30 # arbitrado (valor já usado antes da Sprint 8, mantido)
+    CLEANING: 0.30 # arbitrado por analogia (ajustado de 0.28 antes da Sprint 8)
+    "HOME CARE": 0.30 # idem
+    "PERSONAL CARE": 0.36 # arbitrado por analogia -- higiene/beleza, margem alta típica
+  default_alpha: 0.90 # arbitrado: nível de serviço-alvo (quantil de risco) default
+  category_alpha:
+    # Ainda com as buckets genéricas antigas -- alpha é consumido pela política
+    # basestock (Sprint 11+), fora do escopo da Sprint 8. Não remapeado pelas
+    # categorias reais aqui de propósito; revisitar quando essa sprint chegar.
+    hortifruti: 0.80 # arbitrado: perecível, menor alpha pesa menos a ruptura frente à perda
+    mercearia: 0.90
+    bebidas: 0.92
+    limpeza: 0.90
+
+guardrails:
+  max_coverage_days: 21.0 # arbitrado: teto de cobertura de ~3 semanas antes de soar alarme de excesso
+  max_order_variation_pct: 0.50 # arbitrado: pedido não pode variar mais que 50% sobre a média histórica de compra
+  weekly_budget: null # arbitrado: sem restrição de caixa ativa até termos o dado real do cliente
+
+model:
+  quantiles: [0.5, 0.8, 0.9, 0.95] # arbitrado: cobre mediana e a faixa alta de risco de ruptura
+  retrain_cadence_days: 7 # semanal, conforme CLAUDE.md seção 8 (re-treino diário é inviável e desnecessário)
+
+experiments:
+  arms:
+    - name: erp_baseline
+      forecaster: naive
+      policy: erp_baseline
+    - name: estatistico_basestock
+      forecaster: statistical
+      policy: basestock
+    - name: quantile_gbm_basestock
+      forecaster: quantile_gbm
+      policy: basestock
+
+canonical:
+  # Parâmetros da normalização canônica do Favorita (Sprint 3, motor.io.loaders).
+  # window_start/window_end: decidido, reaproveita profiling.windows.ultimos_24_meses
+  # (Sprint 2) -- 24 meses, não 12, porque é a única das duas janelas que contém o
+  # terremoto do Equador de 2016-04-16 e portanto a única em que is_anomaly chega a
+  # ser verdadeiro (D1). Mantida apesar do custo computacional maior.
+  window_start: 2015-08-16
+  window_end: 2017-08-15
+  delisting_gap_days: 90 # arbitrado: distribuição de buraco final vs. buraco interno não separa de forma limpa (D2) -- corte global único, não por categoria/perecibilidade
+  fractional_threshold: 0.5 # medido: profile_fractional_by_item mostra separação limpa ~0 vs ~1 nos 4.036 itens do Favorita, só 4 na zona cinzenta (D5)
+  anomalies:
+    - name: terremoto_equador_2016
+      start: 2016-04-16 # medido: volume diário nacional sobe de ~650-700k/dia para pico de 1,35M em 2016-04-18
+      end: 2016-04-24 # medido: volume diário nacional volta à faixa de base (~680k) em 2016-04-25
+      reason: "Terremoto M7.8 no Equador em 16/04/2016; pico de compra de emergência em 49 das 54 lojas"
