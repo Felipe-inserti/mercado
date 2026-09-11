@@ -233,6 +233,73 @@ class GuardrailsParams(ParamsSection):
     weekly_budget: NonNegativeFloat | None = None
 
 
+class FeatureCalendarParams(ParamsSection):
+    """Parâmetros de `motor.features.calendar` (Sprint 14): início de mês,
+    quinzena e dia de pagamento. Feriado não tem parâmetro aqui -- vem
+    inteiramente do dado bruto (`holidays_events`), sem limiar arbitrado.
+
+    `payday_days_of_month`: cada valor é um dia do mês (1-31) em que cai
+    pagamento, ou `-1` como sentinela do ÚLTIMO dia do mês (calendário, não
+    número mágico de dia-31 que erraria em fevereiro). Arbitrado: convenção
+    comum de folha de pagamento na América Latina (dia 15 e fechamento do
+    mês) -- não medido, o dataset público não traz data de pagamento real.
+    """
+
+    month_start_max_day: PositiveInt
+    quinzena_split_day: PositiveInt
+    payday_days_of_month: Annotated[list[int], MinLen(1)]
+
+    @model_validator(mode="after")
+    def _payday_days_validos(self) -> FeatureCalendarParams:
+        for dia in self.payday_days_of_month:
+            if dia != -1 and not 1 <= dia <= 31:
+                msg = (
+                    f"payday_days_of_month deve conter -1 (sentinela de último dia do "
+                    f"mês) ou um dia entre 1 e 31; recebeu {dia!r}"
+                )
+                raise ValueError(msg)
+        return self
+
+
+class FeatureHistoricoParams(ParamsSection):
+    """Janelas de `motor.features.build` (Sprint 14): lags, médias/somas
+    móveis e proporções, todas em dias corridos -- fixas no config, não
+    derivadas do `lead_time`/`review_period` de cada item.
+
+    Fixas de propósito: o braço 3 é um modelo GLOBAL (CLAUDE.md, seção 3/9),
+    treinado sobre o painel inteiro de itens com o MESMO esquema de colunas.
+    Se a janela de cada feature viesse do fornecedor de cada item, a mesma
+    coluna significaria janelas diferentes em linhas diferentes, quebrando a
+    comparabilidade entre linhas que um modelo global pressupõe.
+
+    `risk_window_reference_days` é INDEPENDENTE das outras seções -- não
+    deriva automaticamente de `supplier_assumptions.default_lead_time_days` +
+    `default_review_period_days`, mesmo espelhando o valor deles hoje (3+7=10).
+    Motivo: acoplar as duas seções faria uma mudança de premissa de
+    fornecedor alterar silenciosamente o esquema de features. Se fornecedores
+    reais divergirem desse default uniforme, é uma decisão de calibração
+    futura revisitar este valor -- não uma inconsistência a esconder.
+    """
+
+    lag_days: Annotated[list[PositiveInt], MinLen(1)]
+    rolling_windows_days: Annotated[list[PositiveInt], MinLen(1)]
+    risk_window_reference_days: PositiveInt
+
+
+class FeaturesParams(ParamsSection):
+    """Parâmetros de `motor.features` (Sprint 14). `active_features` é a
+    lista exata de colunas de feature emitidas por `build_features`/
+    `build_training_matrix`, na ordem dada -- desliga feature sem mexer no
+    código (CLAUDE.md, seção 2). Cada nome tem que bater com uma coluna de
+    fato calculada a partir de `calendar`/`historico` acima (`build_features`
+    valida isso e levanta erro claro se não bater, nunca ignora silenciosamente
+    um nome desconhecido nem se cala sobre uma feature esquecida na lista)."""
+
+    calendar: FeatureCalendarParams
+    historico: FeatureHistoricoParams
+    active_features: Annotated[list[str], MinLen(1)]
+
+
 class ModelParams(ParamsSection):
     """Quantis previstos e cadência de re-treino do forecaster.
 
@@ -241,6 +308,49 @@ class ModelParams(ParamsSection):
 
     quantiles: Annotated[list[Fraction], MinLen(1)]
     retrain_cadence_days: PositiveInt
+
+
+class QuantileGbmParams(ParamsSection):
+    """Parâmetros de `motor.forecast.quantile_gbm` (Sprint 15): um LightGBM
+    por quantil de `model.quantiles` (grade compartilhada -- não uma lista
+    nova), modelo GLOBAL sobre o painel inteiro, re-treinado a cada
+    `model.retrain_cadence_days` dentro de uma origem móvel.
+
+    `training_window`: EXPANSIVA, com piso mínimo de origens
+    (`min_training_origins`) -- decisão aprovada explicitamente (não
+    deslizante). `min_training_origins` é o piso: a primeira origem do
+    backtest cujo histórico disponível não o atinge levanta erro claro
+    (`InsufficientTrainingHistoryError`), nunca um fit silencioso com poucas
+    origens.
+
+    `decay_half_life_days`: resolve por dentro a tensão "expansiva mistura
+    regime antigo com recente" -- peso de amostra por idade da linha,
+    `weight = 0.5 ** (idade_dias / decay_half_life_days)`. `None` é o valor
+    NEUTRO e é o default: sem decaimento, todo peso = 1.0, byte a byte igual
+    a uma janela expansiva sem ponderação nenhuma. Comparar janela expansiva
+    "pura" contra decaimento de meia-vida diferente vira, a partir de agora,
+    um experimento de config (Sprint 16), não uma escolha arquitetural
+    enterrada nesta sprint.
+
+    `stock` NÃO tem parâmetro aqui nem em `FeaturesParams`: decisão explícita
+    (Sprint 15) -- o dataset público não tem saldo de estoque, e uma feature
+    derivada dele só existiria dentro da simulação, nunca num cliente real
+    sem esse dado. Ver CLAUDE.md, seção 4, para o registro completo.
+
+    Determinismo (CLAUDE.md, seção 2): `seed`, `num_threads` fixos,
+    `deterministic=True` e `force_row_wise=True` sempre ativados no treino
+    -- não são configuráveis, são invariantes do módulo (ver
+    `motor.forecast.quantile_gbm._LGBM_FIXED_PARAMS`).
+    """
+
+    learning_rate: PositiveFloat
+    num_leaves: PositiveInt
+    num_boost_round: PositiveInt
+    num_threads: PositiveInt
+    min_training_origins: PositiveInt
+    decay_half_life_days: PositiveFloat | None = None
+    seed: int
+    model_cache_dir: Path
 
 
 class ExperimentArmParams(ParamsSection):
@@ -300,7 +410,9 @@ class Params(ParamsSection):
     supplier_order_policy: SupplierOrderPolicyParams
     economics: EconomicsParams
     guardrails: GuardrailsParams
+    features: FeaturesParams
     model: ModelParams
+    quantile_gbm: QuantileGbmParams
     experiments: ExperimentsParams
     canonical: CanonicalParams
 

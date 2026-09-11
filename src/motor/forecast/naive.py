@@ -15,6 +15,8 @@ from statistics import mean
 
 import polars as pl
 
+from motor.forecast.base import risk_window_dates
+
 
 def _empirical_quantile(sorted_values: list[float], q: float) -> float:
     """Quantil empírico por interpolação linear sobre uma lista JÁ ordenada
@@ -134,7 +136,7 @@ class NaiveForecaster:
             end_inclusive = t + timedelta(days=horizon - 1)
             if end_inclusive > last_available:
                 continue
-            window_days_needed = [t + timedelta(days=i) for i in range(horizon)]
+            window_days_needed = risk_window_dates(t, horizon)
             if not all(d in self._demand_by_day for d in window_days_needed):
                 continue
             actual = sum(self._demand_by_day[d] for d in window_days_needed)

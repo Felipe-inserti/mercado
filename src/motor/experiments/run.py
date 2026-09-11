@@ -34,8 +34,15 @@ from pydantic import BaseModel, ConfigDict
 
 from motor.config import ExperimentArmParams, Params, load_params
 from motor.experiments.shared import build_simulator_for_pair
+from motor.features.calendar import StoreLocale, load_holidays, load_store_locale
 from motor.forecast.base import Forecaster
 from motor.forecast.naive import NaiveForecaster
+from motor.forecast.quantile_gbm import (
+    QuantileGbmForecaster,
+    QuantileModelRegistry,
+    compute_config_hash,
+    train_quantile_models,
+)
 from motor.forecast.statistical import StatisticalForecaster
 from motor.io.loaders import InputFileManifest, OutputFileManifest
 from motor.metrics.financial import (
@@ -182,6 +189,71 @@ def _build_policy(name: str, params: Params, *, horizon_days: int, alpha: float)
     raise ValueError(msg)
 
 
+def _quantile_gbm_retrain_dates(params: Params) -> list[date]:
+    """Grade semanal de retreino (`model.retrain_cadence_days`), de
+    `simulation.start_date` a `simulation.end_date` -- as únicas datas em que
+    o `Simulator` de fato vai pedir uma previsão (Sprint 15)."""
+    cadence = params.model.retrain_cadence_days
+    dates: list[date] = []
+    d = params.simulation.start_date
+    while d <= params.simulation.end_date:
+        dates.append(d)
+        d += timedelta(days=cadence)
+    return dates
+
+
+def _build_quantile_gbm_registry(
+    *,
+    sales: pl.LazyFrame,
+    items: pl.DataFrame,
+    store_id: str,
+    item_ids: list[str],
+    horizon_by_item: dict[str, int],
+    calendar_locale: StoreLocale,
+    holidays: pl.DataFrame,
+    params: Params,
+) -> tuple[QuantileModelRegistry, pl.DataFrame]:
+    """Treina o modelo GLOBAL do braço 3 UMA VEZ, fora do loop por item (ver
+    docstring de `motor.forecast.quantile_gbm`) -- `run_arm` chama isto antes
+    de montar qualquer `Simulator`, só quando `arm.forecaster == 'quantile_gbm'`.
+
+    Devolve também `sales_full_subset` (todas as colunas canônicas, inclusive
+    `on_promo`) para o loop por item fatiar sem reler o parquet -- é a mesma
+    ideia de `sales_subset` logo abaixo, só que com as colunas que
+    `motor.features` precisa e `Simulator`/`InventoryState` não.
+    """
+    sales_full_subset = sales.filter(
+        (pl.col("store_id") == store_id) & (pl.col("item_id").is_in(item_ids))
+    ).collect()
+
+    retrain_dates = _quantile_gbm_retrain_dates(params)
+    config_hash = compute_config_hash(
+        hyperparams=params.quantile_gbm,
+        features_params=params.features,
+        quantiles=params.model.quantiles,
+        store_id=store_id,
+        item_ids=item_ids,
+    )
+    registry = train_quantile_models(
+        sales_full_subset,
+        items,
+        horizon_by_item,
+        store_id=store_id,
+        item_ids=item_ids,
+        retrain_dates=retrain_dates,
+        earliest_training_origin=params.canonical.window_start,
+        origin_cadence_days=params.model.retrain_cadence_days,
+        quantiles=params.model.quantiles,
+        features_params=params.features,
+        calendar_locale=calendar_locale,
+        holidays=holidays,
+        hyperparams=params.quantile_gbm,
+        cache_dir=Path(params.quantile_gbm.model_cache_dir),
+        config_hash=config_hash,
+    )
+    return registry, sales_full_subset
+
+
 def _find_arm(params: Params, arm_name: str) -> ExperimentArmParams:
     for arm in params.experiments.arms:
         if arm.name == arm_name:
@@ -224,6 +296,11 @@ class ArmRunResult:
     portfolio_metrics: PortfolioFinancialMetrics
     store_id: str
     item_ids: tuple[str, ...]
+    quantile_gbm_registry: QuantileModelRegistry | None = None
+    """Só presente quando `arm.forecaster == 'quantile_gbm'` -- carrega o
+    contador de correção de não-cruzamento (`registry.correction`), lido por
+    `_build_manifest`. `None` para os outros braços: não treinamos um modelo
+    global só para alimentar um contador que nem existiria."""
 
 
 def _events_to_dataframe(*, store_id: str, item_id: str, events: Sequence[object]) -> pl.DataFrame:
@@ -304,14 +381,55 @@ def run_arm(
         .collect()
     )
 
+    horizon_by_item = {
+        item_id: int(lead_time_by_item[item_id]) + int(review_period_by_item[item_id])
+        for item_id in item_ids
+    }
+
+    quantile_gbm_registry: QuantileModelRegistry | None = None
+    sales_full_subset: pl.DataFrame | None = None
+    calendar_locale: StoreLocale | None = None
+    holidays: pl.DataFrame | None = None
+    if arm.forecaster == "quantile_gbm":
+        raw_parquet_dir = Path(params.data.raw_parquet_dir)
+        calendar_locale = load_store_locale(subset.store_id, raw_parquet_dir)
+        holidays = load_holidays(raw_parquet_dir)
+        quantile_gbm_registry, sales_full_subset = _build_quantile_gbm_registry(
+            sales=sales,
+            items=items,
+            store_id=subset.store_id,
+            item_ids=item_ids,
+            horizon_by_item=horizon_by_item,
+            calendar_locale=calendar_locale,
+            holidays=holidays,
+            params=params,
+        )
+
     event_frames: list[pl.DataFrame] = []
     for item_id in item_ids:
         demand = sales_subset.filter(pl.col("item_id") == item_id).select("date", "units_sold")
         lead_time_days = int(lead_time_by_item[item_id])
         review_period_days = int(review_period_by_item[item_id])
-        horizon_days = lead_time_days + review_period_days
+        horizon_days = horizon_by_item[item_id]
 
-        forecaster = _build_forecaster(arm.forecaster, params)
+        if arm.forecaster == "quantile_gbm":
+            assert quantile_gbm_registry is not None
+            assert sales_full_subset is not None
+            assert calendar_locale is not None
+            assert holidays is not None
+            forecaster: Forecaster = QuantileGbmForecaster(
+                store_id=subset.store_id,
+                item_id=item_id,
+                item_sales=sales_full_subset.filter(pl.col("item_id") == item_id),
+                items_catalog=items,
+                expected_horizon=horizon_days,
+                registry=quantile_gbm_registry,
+                calendar_locale=calendar_locale,
+                holidays=holidays,
+                features_params=params.features,
+            )
+        else:
+            forecaster = _build_forecaster(arm.forecaster, params)
         policy = _build_policy(
             arm.policy,
             params,
@@ -365,6 +483,7 @@ def run_arm(
         portfolio_metrics=portfolio_metrics,
         store_id=subset.store_id,
         item_ids=subset.item_ids,
+        quantile_gbm_registry=quantile_gbm_registry,
     )
 
 
@@ -401,6 +520,40 @@ _BASESTOCK_ALPHA_LIMITATION = (
     "interpretável por categoria. Remapeamento de category_alpha para as categorias reais "
     "fica para uma sprint de calibração dedicada, medido isoladamente contra este braço já "
     "congelado."
+)
+
+_QUANTILE_CROSSING_METHODOLOGY_NOTE = (
+    "Medido antes de implementar (relatório da Sprint 15), sobre um fit piloto no "
+    "subconjunto real -- números ESTÁTICOS, não recalculados a cada rodada (recalcular "
+    "com 3000 rounds a cada execução do braço seria puro desperdício de tempo pra um "
+    "diagnóstico que já não mudou entre as três variantes medidas). Três variantes "
+    "lado a lado, porque a primeira medição (in-sample, 200 rounds) é sabidamente "
+    "otimista de duas formas independentes: (A) in-sample, 200 rounds -- 34.84% das "
+    "linhas com alguma inversão adjacente (q0.5>q0.8: 2.87%, q0.8>q0.9: 15.29%, "
+    "q0.9>q0.95: 19.08%); (B) fora da amostra, mesmos boosters de (A), origem ~10 "
+    "semanas depois do fim do treino -- 36.73% (6.18%, 16.36%, 18.55%); (C) in-sample, "
+    "3000 rounds + learning_rate=0.03 (checa se (A) era subtreino) -- 33.94% (3.52%, "
+    "14.10%, 18.63%). CONCLUSÃO: os três números são ESTÁVEIS entre si -- nem overfitting "
+    "in-sample nem subtreino explicam a taxa medida. O cruzamento é estrutural (dois "
+    "modelos independentes por linha, sem restrição de monotonicidade entre eles), não "
+    "artefato de medição -- a correção de não-cruzamento (NonCrossingCorrection) não é "
+    "cosmética, e o contador de quantas vezes ela atua nesta rodada (abaixo) é esperado "
+    "ser grande, não raro."
+)
+
+_ZERO_TARGET_SHARE_LIMITATION = (
+    "Medido antes de implementar (relatório da Sprint 15), sobre o subconjunto real: a "
+    "proporção de janelas de risco com alvo zero (demanda acumulada = 0) é de só 0.30% "
+    "(14.025 combinações item x origem semanal, 51 origens x 275 itens) -- 260 dos 275 "
+    "itens NUNCA tiveram uma janela de risco zerada em nenhuma das 51 origens medidas. "
+    "Isso NÃO é uma propriedade geral de demanda de varejo -- é consequência direta do "
+    "critério de seleção do subconjunto de trabalho (subset_selection.density_threshold="
+    "0.9, Sprint 4: só entram itens de demanda REGULAR). Um subconjunto de cauda mais "
+    "longa (itens intermitentes, density_threshold mais baixo) teria proporção de zeros "
+    "bem maior, e a pinball loss nos quantis baixos se comportaria de forma diferente "
+    "-- não avaliado aqui, fora do escopo desta sprint. Não generalizar este número para "
+    "'a demanda deste tipo de negócio raramente é zero' -- é 'o subconjunto ESCOLHIDO "
+    "raramente tem demanda zero', por construção."
 )
 
 _PARAMS_HASH_SCOPE_NOTE = (
@@ -459,6 +612,31 @@ class BasestockCalibrationManifest(BaseModel):
     limitation: str
 
 
+class QuantileGbmDiagnosticsManifest(BaseModel):
+    """Diagnóstico do braço 3 (Sprint 15) -- SÓ presente quando
+    `arm.forecaster == 'quantile_gbm'` (ao contrário de
+    `erp_baseline_calibration`/`basestock_calibration`, que são sempre
+    presentes): treinar o modelo global só para preencher um campo inerte
+    num braço que nem o usa seria puro desperdício de computação, não
+    documentação de graça.
+
+    `crossing_methodology_note` e os três pares de números que ele descreve
+    são ESTÁTICOS (medidos uma vez, no relatório da sprint) -- não
+    recalculados a cada rodada. `n_correction_calls`/`n_correction_activations`
+    são AO VIVO: contam de fato quantas previsões desta rodada específica
+    passaram pela correção de não-cruzamento e quantas precisaram dela.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    crossing_methodology_note: str
+    zero_target_share_limitation: str
+    n_retrain_dates: int
+    n_correction_calls: int
+    n_correction_activations: int
+    correction_activation_rate: float
+
+
 class PortfolioResultsManifest(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -510,6 +688,7 @@ class RunManifest(BaseModel):
     shared_assumptions: dict[str, str]
     erp_baseline_calibration: ErpBaselineCalibrationManifest
     basestock_calibration: BasestockCalibrationManifest
+    quantile_gbm_diagnostics: QuantileGbmDiagnosticsManifest | None = None
     financial_assumptions: FinancialAssumptionsManifest
     limitations: list[str]
     results: ResultsManifest
@@ -625,6 +804,23 @@ def _build_manifest(
                 "está declarado mas não é consumido nesta sprint (ver EconomicsParams)."
             ),
             limitation=_BASESTOCK_ALPHA_LIMITATION,
+        ),
+        quantile_gbm_diagnostics=(
+            QuantileGbmDiagnosticsManifest(
+                crossing_methodology_note=_QUANTILE_CROSSING_METHODOLOGY_NOTE,
+                zero_target_share_limitation=_ZERO_TARGET_SHARE_LIMITATION,
+                n_retrain_dates=len(_quantile_gbm_retrain_dates(params)),
+                n_correction_calls=result.quantile_gbm_registry.correction.n_calls,
+                n_correction_activations=result.quantile_gbm_registry.correction.n_corrected,
+                correction_activation_rate=(
+                    result.quantile_gbm_registry.correction.n_corrected
+                    / result.quantile_gbm_registry.correction.n_calls
+                    if result.quantile_gbm_registry.correction.n_calls > 0
+                    else 0.0
+                ),
+            )
+            if result.quantile_gbm_registry is not None
+            else None
         ),
         financial_assumptions=FinancialAssumptionsManifest(
             uniform_unit_price=params.economics.uniform_unit_price,

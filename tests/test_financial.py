@@ -20,7 +20,9 @@ from motor.metrics.financial import (
     build_item_economics,
     compute_financial_metrics,
     compute_portfolio_metrics,
+    daily_net_margin,
 )
+from motor.simulator.engine import DailyEvent
 from tests.fakes import build_analytic_scenario
 
 # -- build_item_economics -----------------------------------------------
@@ -274,3 +276,86 @@ def test_evaluation_start_filtra_o_warmup_internamente() -> None:
 
     assert com_filtro["nivel_servico"] == pytest.approx(1.0)
     assert sem_filtro["nivel_servico"] < 1.0  # aquecimento tem ruptura real
+
+
+# -- daily_net_margin (Sprint 15) ----------------------------------------
+
+
+def test_daily_net_margin_e_margem_menos_perda_por_dia() -> None:
+    """Dois dias, um item: dia 1 só vende (sem perda), dia 2 só expira (sem
+    venda) -- `net_margin_rs` tem que refletir os dois efeitos, por dia,
+    sem misturar um no outro."""
+    events = [
+        DailyEvent(
+            day=D0,
+            on_hand_start=10.0,
+            in_transit_start=0.0,
+            demand=5.0,
+            sold=5.0,
+            unmet_demand=0.0,
+            expired=0.0,
+            order_placed=None,
+            on_hand_end=5.0,
+            in_transit_end=0.0,
+        ),
+        DailyEvent(
+            day=D0 + timedelta(days=1),
+            on_hand_start=5.0,
+            in_transit_start=0.0,
+            demand=0.0,
+            sold=0.0,
+            unmet_demand=0.0,
+            expired=5.0,
+            order_placed=None,
+            on_hand_end=0.0,
+            in_transit_end=0.0,
+        ),
+    ]
+    events_df = _events_df("A", events)
+    economics = _economics_df(item_id="A", price=_PRICE, margin_pct=_MARGIN_PCT)
+
+    result = daily_net_margin(events_df, economics, evaluation_start=D0).sort("day")
+    rows = result.to_dicts()
+
+    assert rows[0]["day"] == D0
+    assert rows[0]["net_margin_rs"] == pytest.approx(5.0 * (_PRICE - _COST))  # só margem
+    assert rows[1]["day"] == D0 + timedelta(days=1)
+    assert rows[1]["net_margin_rs"] == pytest.approx(-5.0 * _COST)  # só perda
+
+
+def test_daily_net_margin_soma_entre_itens_no_mesmo_dia() -> None:
+    evento_a = DailyEvent(
+        day=D0,
+        on_hand_start=10.0,
+        in_transit_start=0.0,
+        demand=5.0,
+        sold=5.0,
+        unmet_demand=0.0,
+        expired=0.0,
+        order_placed=None,
+        on_hand_end=5.0,
+        in_transit_end=0.0,
+    )
+    evento_b = DailyEvent(
+        day=D0,
+        on_hand_start=10.0,
+        in_transit_start=0.0,
+        demand=3.0,
+        sold=3.0,
+        unmet_demand=0.0,
+        expired=0.0,
+        order_placed=None,
+        on_hand_end=7.0,
+        in_transit_end=0.0,
+    )
+    events_df = pl.concat([_events_df("A", [evento_a]), _events_df("B", [evento_b])])
+    economics = pl.concat(
+        [
+            _economics_df(item_id="A", price=_PRICE, margin_pct=_MARGIN_PCT),
+            _economics_df(item_id="B", price=_PRICE, margin_pct=_MARGIN_PCT),
+        ]
+    )
+
+    result = daily_net_margin(events_df, economics, evaluation_start=D0)
+    assert result.height == 1  # um dia só
+    assert result["net_margin_rs"][0] == pytest.approx((5.0 + 3.0) * (_PRICE - _COST))

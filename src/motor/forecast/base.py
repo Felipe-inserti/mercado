@@ -12,10 +12,41 @@ alterar o loop. Ver a emenda datada em CLAUDE.md, seção 5.
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 from typing import Protocol
 
 import polars as pl
+
+
+def risk_window_dates(as_of: date, horizon: int) -> list[date]:
+    """A janela de risco: `[as_of, as_of + horizon - 1]`, INCLUINDO o próprio
+    `as_of` -- não `as_of + 1`. Fonte ÚNICA desta convenção no projeto
+    (Sprint 15): `NaiveForecaster`/`StatisticalForecaster` (backtest de
+    resíduos) e `motor.forecast.quantile_gbm` (construção do alvo) chamam
+    esta função -- nenhum dos três reescreve o range por conta própria.
+
+    Por que `as_of` entra na janela: é assim que os dois forecasters de
+    sprints anteriores já foram construídos (`_backtest_residuals` de ambos
+    usa `t + timedelta(days=i) for i in range(horizon)`), e mudar essa
+    convenção numa sprint futura sem mudar as outras é o tipo de divergência
+    silenciosa que não levanta exceção nenhuma e só envenena o resultado
+    (`tests/test_risk_window_consistency.py` existe pra pegar exatamente
+    isso -- ver a docstring de lá antes de tocar aqui).
+    """
+    if horizon <= 0:
+        msg = f"horizon deve ser positivo, recebeu {horizon}"
+        raise ValueError(msg)
+    return [as_of + timedelta(days=i) for i in range(horizon)]
+
+
+def risk_window_bounds(as_of: date, horizon: int) -> tuple[date, date]:
+    """`(início_inclusive, fim_exclusivo)` da mesma janela de
+    `risk_window_dates` -- conveniência para filtro por intervalo
+    (`date >= início) & (date < fim)`) em vez de lista de datas. As duas
+    formas têm que concordar sempre: `tests/test_risk_window_consistency.py`
+    fixa essa equivalência."""
+    dates = risk_window_dates(as_of, horizon)
+    return dates[0], dates[-1] + timedelta(days=1)
 
 
 class Forecaster(Protocol):

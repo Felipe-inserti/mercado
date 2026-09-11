@@ -64,6 +64,10 @@ sales — store_id, item_id, date, units, price, on_promo items — item_id, cat
 
 Se stock não existir, o sistema opera assumindo que as vendas observadas são a demanda. Isso deve ser registrado explicitamente na saída do experimento como uma premissa ativa, não escondido.
 
+Emenda (Sprint 14, 2026-09-11): as quatro tabelas acima continuam a ÚNICA porta de entrada para lógica de negócio (previsão, política, simulador, métricas). `motor.features.calendar`, porém, abre uma SEGUNDA porta de I/O, deliberada e restrita: lê `holidays_events` e `stores` direto do parquet bruto já convertido (`motor.io.raw.scan_raw`, Sprint 2), fora do canônico. Motivo: cidade/estado da loja e calendário de feriado não têm onde morar nas quatro tabelas de negócio acima — são metadado de geografia/calendário público, não fato de venda, item, fornecedor ou estoque, e forçá-los para dentro de `items`/`suppliers` mudaria o grão dessas tabelas sem necessidade. A regra de vazamento (seção 8) não se aplica a esta porta — feriado de qualquer data é conhecido de antemão, ao contrário de venda —, mas a regra de "nenhum módulo abaixo de `io/` conhece o formato original" continua valendo à risca: só `motor.features.calendar` conhece `RAW_SCHEMAS`/`scan_raw` para esses dois arquivos; nenhum outro módulo lê `holidays_events`/`stores` diretamente.
+
+Emenda (Sprint 15, 2026-09-11): `stock` fica FORA de `motor.features` — decisão explícita, não esquecimento. O dataset público não tem saldo de estoque; uma feature derivada dele (ex.: flag de ruptura) só existiria dentro da simulação (que conhece `InventoryState`), nunca num cliente real sem esse dado — o modelo aprenderia a depender de algo que não generaliza. Não volta sem uma conversa nova.
+
 5. Contratos internos
 
 Estes três protocolos são a espinha dorsal. Não os altere sem avisar.

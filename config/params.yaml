@@ -259,9 +259,90 @@ guardrails:
   max_order_variation_pct: 0.50 # arbitrado: pedido não pode variar mais que 50% sobre a média histórica de compra
   weekly_budget: null # arbitrado: sem restrição de caixa ativa até termos o dado real do cliente
 
+features:
+  # Sprint 14: motor.features.calendar / motor.features.build. Nenhum modelo
+  # ainda consome isto -- é a camada de features pra alimentar o LightGBM da
+  # Sprint 15, construída e testada contra vazamento antes de existir treino.
+  calendar:
+    month_start_max_day: 3 # arbitrado
+    quinzena_split_day: 15 # convenção de calendário (metade do mês), parametrizado por disciplina, não por incerteza
+    payday_days_of_month: [15, -1] # arbitrado: dia 15 e último dia do mês -- convenção comum
+      # de folha de pagamento na América Latina; -1 é sentinela de "último dia do mês",
+      # nunca 28/30/31 fixo (erraria em fevereiro e em mês de 30 dias)
+  historico:
+    lag_days: [1, 7, 14, 28] # ontem, mesmo dia da semana passada, duas semanas, quatro semanas
+    rolling_windows_days: [7, 14, 28, 56] # múltiplos semanais -- média/proporção nessas janelas
+    risk_window_reference_days: 10 # arbitrado, INDEPENDENTE de supplier_assumptions: espelha
+      # lead_time_days(3) + review_period_days(7) default de hoje, mas não deriva
+      # automaticamente deles -- ver docstring de FeatureHistoricoParams em motor.config
+  # Lista exata das colunas emitidas, na ordem -- desliga feature sem mexer no código.
+  # Nomes têm que bater com o que build_features de fato calcula a partir de
+  # calendar/historico acima (validado em runtime, erro claro se não bater).
+  active_features:
+    - weekday
+    - is_month_start
+    - quinzena
+    - days_to_payday
+    - is_holiday_national
+    - is_holiday_regional
+    - is_holiday_local
+    - lag_units_1
+    - lag_units_7
+    - lag_units_14
+    - lag_units_28
+    - rolling_mean_units_7d
+    - rolling_mean_units_14d
+    - rolling_mean_units_28d
+    - rolling_mean_units_56d
+    - rolling_sum_units_10d
+    - share_days_with_sale_7d
+    - share_days_with_sale_14d
+    - share_days_with_sale_28d
+    - share_days_with_sale_56d
+    - promo_share_7d
+    - promo_share_14d
+    - promo_share_28d
+    - promo_share_56d
+    - promo_known_share_7d
+    - promo_known_share_14d
+    - promo_known_share_28d
+    - promo_known_share_56d
+    - days_since_last_sale
+    - days_since_last_promo
+    - category
+    - item_class
+    - is_perishable
+
 model:
   quantiles: [0.5, 0.8, 0.9, 0.95] # arbitrado: cobre mediana e a faixa alta de risco de ruptura
   retrain_cadence_days: 7 # semanal, conforme CLAUDE.md seção 8 (re-treino diário é inviável e desnecessário)
+
+quantile_gbm:
+  # Sprint 15: motor.forecast.quantile_gbm. Medido antes de implementar (ver
+  # relatório da sprint): custo de retreino é desprezível (~1-3 min pro
+  # backtest inteiro, 51 retreinos x 4 quantis) -- os hiperparâmetros abaixo
+  # não foram escolhidos sob pressão de tempo, só não foram calibrados por
+  # grade (fora de escopo desta sprint, sem CV pedido no enunciado).
+  learning_rate: 0.05 # arbitrado: moderado, não o 0.1 default nem o 0.03 usado só no diagnóstico de cruzamento
+  num_leaves: 31 # arbitrado: default do LightGBM, painel pequeno (dezenas de milhares de linhas) não pede mais
+  num_boost_round: 500 # arbitrado: bem acima dos 200 usados no diagnóstico (que já não mudava o cruzamento de quantis)
+  num_threads: 1 # fixo por determinismo (CLAUDE.md seção 2) -- não escala com nproc de propósito
+  seed: 42 # arbitrado: mesma disciplina de simulation.seed -- importa ser fixo, não qual valor
+  # Piso mínimo de origens de treino disponíveis no primeiro retreino do
+  # backtest -- erro claro (InsufficientTrainingHistoryError) se não bater,
+  # nunca um fit silencioso com poucas origens. Medido: o subconjunto real
+  # tem ~52 origens semanais disponíveis ANTES de simulation.start_date
+  # (canonical.window_start até lá) -- 8 é um piso confortavelmente abaixo
+  # disso, não um número que a configuração atual quase não atinge.
+  min_training_origins: 8
+  # Janela de treino EXPANSIVA (decisão aprovada, não deslizante) -- a tensão
+  # "regime antigo mistura com recente" é resolvida por decaimento de peso
+  # por idade da linha, não por encurtar a janela. `null` é o valor NEUTRO:
+  # sem decaimento, toda linha pesa igual, resultado byte a byte idêntico a
+  # uma janela expansiva sem ponderação -- default deliberado até uma
+  # calibração dedicada (Sprint 16) comparar meias-vidas candidatas.
+  decay_half_life_days: null
+  model_cache_dir: results/model_cache/quantile_gbm # cache por (hash de config, data de retreino) -- nunca só por data
 
 experiments:
   arms:

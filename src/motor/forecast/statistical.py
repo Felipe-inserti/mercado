@@ -57,6 +57,8 @@ from statistics import mean
 
 import polars as pl
 
+from motor.forecast.base import risk_window_dates
+
 _ISO_WEEKDAYS = range(1, 8)
 
 
@@ -193,8 +195,7 @@ class StatisticalForecaster:
         seasonal_indices = self._seasonal_indices(cutoff)
         level = self._recent_level(cutoff, seasonal_indices)
         return sum(
-            level * seasonal_indices[(cutoff + timedelta(days=i)).isoweekday()]
-            for i in range(horizon)
+            level * seasonal_indices[d.isoweekday()] for d in risk_window_dates(cutoff, horizon)
         )
 
     def _backtest_residuals(self, horizon: int) -> list[float]:
@@ -220,7 +221,7 @@ class StatisticalForecaster:
             end_inclusive = t + timedelta(days=horizon - 1)
             if end_inclusive > last_available:
                 continue
-            window_days_needed = [t + timedelta(days=i) for i in range(horizon)]
+            window_days_needed = risk_window_dates(t, horizon)
             if not all(d in self._demand_by_day for d in window_days_needed):
                 continue
             actual = sum(self._demand_by_day[d] for d in window_days_needed)

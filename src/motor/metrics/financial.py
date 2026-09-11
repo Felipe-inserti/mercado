@@ -367,3 +367,27 @@ def compute_portfolio_metrics(
         carrying_cost_rs=carrying_cost_rs,
         decision_metric=decision_metric,
     )
+
+
+def daily_net_margin(
+    events: pl.DataFrame, item_economics: pl.DataFrame, *, evaluation_start: date
+) -> pl.DataFrame:
+    """Margem realizada MENOS perda, por dia (somada sobre todos os itens) --
+    não por item, não agregada no período inteiro (Sprint 15).
+
+    `decision_metric` é uma razão sobre o período inteiro, não uma série no
+    tempo -- esta função existe pra alimentar a curva de R$ acumulado que
+    compara os braços (`experiments.compare_arms`), via `cumsum` de
+    `net_margin_rs` sobre `day`. Nunca confundir os dois: a curva mostra
+    trajetória (líquida de perda, mas ainda em R$, não normalizada por
+    capital); `decision_metric` é quem ordena os braços de fato (CLAUDE.md,
+    seção 7).
+
+    Devolve `day`, `net_margin_rs`, ordenado por `day`.
+    """
+    priced = _priced_events(events, item_economics, evaluation_start=evaluation_start)
+    return (
+        priced.group_by("day")
+        .agg((pl.col("margem_dia").sum() - pl.col("perda_dia").sum()).alias("net_margin_rs"))
+        .sort("day")
+    )

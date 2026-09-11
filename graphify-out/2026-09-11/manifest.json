@@ -12,9 +12,9 @@
     "semantic_hash": "d41d8cd98f00b204e9800998ecf8427e"
   },
   "src/motor/config.py": {
-    "mtime": 1789098483.6679573,
-    "seen": 1789101980.6334558,
-    "ast_hash": "80395b392ae6f67c84da3ecfde398868",
+    "mtime": 1789097016.080276,
+    "seen": 1789097414.6249588,
+    "ast_hash": "1194357f6731795c9598340be1eef878",
     "semantic_hash": ""
   },
   "src/motor/experiments/__init__.py": {
@@ -108,9 +108,9 @@
     "semantic_hash": "7b41d4fd222bfa57e8bb2ce293ca82bd"
   },
   "CLAUDE.md": {
-    "mtime": 1789099787.8036716,
-    "seen": 1789101980.633519,
-    "ast_hash": "a1e906cab4f980643b97d19373c8f8d3",
+    "mtime": 1789097406.8921921,
+    "seen": 1789097414.6250043,
+    "ast_hash": "c82be45ff5646d3fb0736ef53fd1e9a2",
     "semantic_hash": ""
   },
   "README.md": {
@@ -120,9 +120,9 @@
     "semantic_hash": "83eea1e8c55de1d804bf3a23bbeece13"
   },
   "config/params.yaml": {
-    "mtime": 1789098729.0759053,
-    "seen": 1789101980.6335208,
-    "ast_hash": "2a682eae91fc5dc174d6a60976027d45",
+    "mtime": 1789097030.540272,
+    "seen": 1789097414.6250055,
+    "ast_hash": "a02117e74895d0a41e852aea727ad0ce",
     "semantic_hash": ""
   },
   ".claude/settings.json": {
@@ -156,9 +156,9 @@
     "semantic_hash": ""
   },
   "src/motor/experiments/run.py": {
-    "mtime": 1789100833.5434449,
-    "seen": 1789101980.6334584,
-    "ast_hash": "d663c8dbdb2899c7568a24948dd71a44",
+    "mtime": 1789091973.7573771,
+    "seen": 1789092286.3374805,
+    "ast_hash": "a0caaeda23b55c4d45696ce00e44058c",
     "semantic_hash": ""
   },
   "src/motor/experiments/shared.py": {
@@ -168,15 +168,15 @@
     "semantic_hash": ""
   },
   "src/motor/forecast/base.py": {
-    "mtime": 1789098411.999973,
-    "seen": 1789101980.6334655,
-    "ast_hash": "b78429a504e75b265c187d34483c0719",
+    "mtime": 1789070394.0703769,
+    "seen": 1789081223.494024,
+    "ast_hash": "a835da94194fdc570bcc37f587b6419b",
     "semantic_hash": ""
   },
   "src/motor/forecast/naive.py": {
-    "mtime": 1789098418.3879716,
-    "seen": 1789101980.633467,
-    "ast_hash": "70d1a16ed0f02801516245413ec45ca1",
+    "mtime": 1789078404.8309274,
+    "seen": 1789081223.4940248,
+    "ast_hash": "39baf325e03196e8c8b6902e5ee334bb",
     "semantic_hash": ""
   },
   "src/motor/inventory.py": {
@@ -264,15 +264,15 @@
     "semantic_hash": ""
   },
   "src/motor/metrics/financial.py": {
-    "mtime": 1789099834.563661,
-    "seen": 1789101980.6334765,
-    "ast_hash": "c376836abf85a2df425f3c4da09dc894",
+    "mtime": 1789086379.885489,
+    "seen": 1789087546.1747265,
+    "ast_hash": "0726f0a2cd9a3efe1b1ddad92a290248",
     "semantic_hash": ""
   },
   "tests/test_financial.py": {
-    "mtime": 1789099858.2316556,
-    "seen": 1789101980.6335003,
-    "ast_hash": "cf0c30aa014c53093134910e735e5110",
+    "mtime": 1789082837.5862591,
+    "seen": 1789082866.6538138,
+    "ast_hash": "645de9ac9e4d5dd2f079bed4131921b1",
     "semantic_hash": ""
   },
   "src/motor/policy/supplier.py": {
@@ -288,9 +288,9 @@
     "semantic_hash": ""
   },
   "src/motor/forecast/statistical.py": {
-    "mtime": 1789098428.5879695,
-    "seen": 1789101980.6334689,
-    "ast_hash": "69488c55f01d11f53a10e955d891ed33",
+    "mtime": 1789091836.789407,
+    "seen": 1789092286.337485,
+    "ast_hash": "fc4c833e91a52536a55f1083cfec7a89",
     "semantic_hash": ""
   },
   "src/motor/policy/basestock.py": {
@@ -351,30 +351,6 @@
     "mtime": 1789097383.4881976,
     "seen": 1789097414.6249917,
     "ast_hash": "4a4bea7eeaf275d0e6ff70d0ff8d2b11",
-    "semantic_hash": ""
-  },
-  "notebooks/sprint15_comparacao_bracos.py": {
-    "mtime": 1789100056.3796144,
-    "seen": 1789101980.6334496,
-    "ast_hash": "7aa907cf024ffd8d142110f8bd49a4c7",
-    "semantic_hash": ""
-  },
-  "src/motor/forecast/quantile_gbm.py": {
-    "mtime": 1789098927.3758612,
-    "seen": 1789101980.633468,
-    "ast_hash": "ef1fb7489c8f91853779aee6c67d61dc",
-    "semantic_hash": ""
-  },
-  "tests/test_quantile_gbm.py": {
-    "mtime": 1789099274.4837852,
-    "seen": 1789101980.633507,
-    "ast_hash": "cacd56121a6130b1cac468d029852db0",
-    "semantic_hash": ""
-  },
-  "tests/test_risk_window_consistency.py": {
-    "mtime": 1789099291.927781,
-    "seen": 1789101980.633509,
-    "ast_hash": "29dc627e6f26f09aaeeecabfb8624693",
     "semantic_hash": ""
   }
 }
