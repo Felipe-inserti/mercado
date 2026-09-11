@@ -30,6 +30,8 @@ from motor.experiments.run import (
     load_or_select_subset,
     run_arm,
 )
+from motor.forecast.statistical import StatisticalForecaster
+from motor.policy.basestock import BasestockPolicy
 from motor.selection import SubsetSelectionResult
 
 PARAMS_PATH = Path(__file__).resolve().parent.parent / "config" / "params.yaml"
@@ -288,6 +290,32 @@ def test_run_arm_produz_uma_linha_por_item_dia(tmp_path: Path) -> None:
     assert saida.events["day"].max() == SIM_END
 
 
+def test_run_arm_estatistico_basestock_roda_ponta_a_ponta_com_as_mesmas_metricas(
+    tmp_path: Path,
+) -> None:
+    """Fecha o braço 2 (Sprint 12): mesmo subconjunto, mesmo período, mesmas
+    colunas de métrica que o braço 1 -- só forecaster/policy mudam."""
+    sales, items, suppliers, params = _cenario_dois_itens()
+    result = SubsetSelectionResult(store_id="S1", item_ids=("I1", "I2"), funnel=pl.DataFrame())
+    cache_path = _cache_path_pre_populado(tmp_path, params, result)
+
+    saida = run_arm(
+        "estatistico_basestock",
+        params,
+        sales=sales,
+        items=items,
+        suppliers=suppliers,
+        stock=_EMPTY_STOCK,
+        subset_cache_path=cache_path,
+    )
+
+    n_dias = (SIM_END - SIM_START).days + 1
+    assert saida.events.height == 2 * n_dias
+    assert set(saida.events["item_id"].unique().to_list()) == {"I1", "I2"}
+    assert saida.item_metrics.height == 2
+    assert 0.0 <= saida.portfolio_metrics.nivel_servico <= 1.0
+
+
 def test_run_arm_e_deterministico_entre_duas_chamadas(tmp_path: Path) -> None:
     sales, items, suppliers, params = _cenario_dois_itens()
     result = SubsetSelectionResult(store_id="S1", item_ids=("I1", "I2"), funnel=pl.DataFrame())
@@ -328,9 +356,23 @@ def test_build_forecaster_desconhecido_levanta_value_error() -> None:
         _build_forecaster("nao_existe", _tiny_params())
 
 
+def test_build_forecaster_statistical_devolve_statistical_forecaster() -> None:
+    forecaster = _build_forecaster("statistical", _tiny_params())
+    assert isinstance(forecaster, StatisticalForecaster)
+
+
+def test_build_policy_basestock_devolve_basestock_policy() -> None:
+    params = _tiny_params()
+    policy = _build_policy(
+        "basestock", params, horizon_days=5, alpha=params.economics.default_alpha
+    )
+    assert isinstance(policy, BasestockPolicy)
+
+
 def test_build_policy_desconhecida_levanta_value_error() -> None:
+    params = _tiny_params()
     with pytest.raises(ValueError, match="policy desconhecida"):
-        _build_policy("nao_existe", _tiny_params(), horizon_days=5)
+        _build_policy("nao_existe", params, horizon_days=5, alpha=params.economics.default_alpha)
 
 
 def test_find_arm_desconhecido_levanta_value_error() -> None:
@@ -397,6 +439,11 @@ def test_build_manifest_contem_premissas_compartilhadas_calibracao_e_financeiro(
     assert manifest.erp_baseline_calibration.factor == params.erp_baseline.factor
     assert manifest.erp_baseline_calibration.min_order_units == params.erp_baseline.min_order_units
     assert manifest.erp_baseline_calibration.coverage_context
+
+    # braço 2 (Sprint 12): registrado no manifesto de todo braço, não só quando ativo
+    assert manifest.basestock_calibration.alpha == params.economics.default_alpha
+    assert "uniforme" in manifest.basestock_calibration.alpha_scope
+    assert "category_alpha" in manifest.basestock_calibration.limitation
 
     # financeiro (Sprint 9): premissas E resultado no mesmo arquivo
     assert manifest.financial_assumptions.uniform_unit_price == params.economics.uniform_unit_price

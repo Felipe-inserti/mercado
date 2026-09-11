@@ -14,7 +14,7 @@ from typing import Annotated
 
 import yaml
 from annotated_types import Ge, Gt, Le, MinLen
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, model_validator
 
 NonNegativeFloat = Annotated[float, Ge(0.0)]
 PositiveFloat = Annotated[float, Gt(0.0)]
@@ -127,6 +127,25 @@ class ForecastNaiveParams(ParamsSection):
     min_residual_samples: PositiveInt
 
 
+class ForecastStatisticalParams(ParamsSection):
+    """Parâmetros de `motor.forecast.statistical.StatisticalForecaster` (Sprint 12).
+
+    `level_window_weeks` (nível recente) e `seasonal_window_weeks` (índice de
+    sazonalidade semanal) são janelas INDEPENDENTES uma da outra e de
+    `forecast_naive.moving_average_weeks` -- ao contrário do braço 1, este
+    modelo não precisa concordar com nenhuma política sobre o tamanho da
+    janela (`BasestockPolicy` não deriva nada do histórico bruto, só consome
+    `predict_quantiles`). Todos os três valores são arbitrados: pisos
+    plausíveis para o nível não ficar refém de poucos dias e para o índice
+    sazonal ter pelo menos ~12 ocorrências de cada dia da semana sem usar
+    dado velho demais.
+    """
+
+    level_window_weeks: PositiveInt
+    seasonal_window_weeks: PositiveInt
+    min_residual_samples: PositiveInt
+
+
 class ErpBaselineParams(ParamsSection):
     """Parâmetros calibrados de `motor.policy.erp_baseline.ErpBaselinePolicy`
     (Sprint 7). Ver `config/params.yaml` para o registro completo por escrito
@@ -177,6 +196,25 @@ class EconomicsParams(ParamsSection):
     métrica ordenadora nem o giro (só o tamanho dos R$ absolutos reportados);
     ver a docstring daquele módulo para a prova e para as limitações que essa
     escolha introduz.
+
+    `default_alpha` (Sprint 12): `motor.policy.basestock.BasestockPolicy` usa
+    este valor, UNIFORME para todo item -- decisão explícita da sprint, não
+    esquecimento: braço 2 e braço 3 (sprint futura) precisam compartilhar o
+    mesmo alpha para que a diferença de R$ entre eles seja atribuível só à
+    previsão, não a uma mudança simultânea de alpha por categoria. Ver
+    `config/params.yaml` para o registro completo do trade-off.
+
+    `category_alpha` continua com as chaves genéricas antigas (hortifruti/
+    mercearia/bebidas/limpeza), que NÃO batem com `Item.category` real do
+    subconjunto de trabalho -- ainda não está ligado a nenhuma política
+    (`default_alpha` sempre vence). Remapear para as categorias reais,
+    como a Sprint 8 fez para `category_margin_pct`, é decisão de negócio
+    (qual categoria tolera mais ruptura vs. mais capital parado) adiada de
+    propósito para uma sprint de calibração dedicada -- não confundir "não
+    wireado ainda" com "sem risco": todo valor aqui é validado contra
+    `model.quantiles` mesmo assim (ver `Params._alpha_bate_com_a_grade_de_quantis`),
+    porque um valor fora da grade quebraria `compute_order_quantity` no
+    instante em que alguém finalmente ligasse essa chave.
     """
 
     capital_cost_annual: NonNegativeFloat
@@ -256,6 +294,7 @@ class Params(ParamsSection):
     subset_selection: SubsetSelectionParams
     simulation: SimulationParams
     forecast_naive: ForecastNaiveParams
+    forecast_statistical: ForecastStatisticalParams
     erp_baseline: ErpBaselineParams
     supplier_assumptions: SupplierAssumptionsParams
     supplier_order_policy: SupplierOrderPolicyParams
@@ -264,6 +303,41 @@ class Params(ParamsSection):
     model: ModelParams
     experiments: ExperimentsParams
     canonical: CanonicalParams
+
+    @model_validator(mode="after")
+    def _alpha_bate_com_a_grade_de_quantis(self) -> Params:
+        """`compute_order_quantity` (motor.policy.target_level, regra do
+        enunciado) rejeita `alpha` que não seja uma chave presente nos
+        quantis produzidos pelo forecaster -- sem esta guarda, um
+        `default_alpha`/`category_alpha` fora de `model.quantiles` só
+        estouraria `ValueError` lá dentro, decisão a decisão, longe da causa
+        raiz (config/params.yaml). `category_alpha` ainda não está ligado a
+        nenhuma política (Sprint 12: `BasestockPolicy` usa só
+        `default_alpha`, uniforme -- ver docstring de `EconomicsParams` e o
+        manifesto do braço), mas é validado do mesmo jeito: um valor fora da
+        grade hoje é uma armadilha armada para quem remapear as chaves
+        amanhã, não um erro inofensivo por estar inerte.
+        """
+        grade = self.model.quantiles
+        grade_set = set(grade)
+        if self.economics.default_alpha not in grade_set:
+            msg = (
+                f"economics.default_alpha={self.economics.default_alpha!r} não é um dos "
+                f"quantis produzidos pelo forecaster (model.quantiles={grade!r}) -- "
+                "compute_order_quantity rejeitaria esse alpha; ajuste default_alpha ou "
+                "acrescente o valor a model.quantiles."
+            )
+            raise ValueError(msg)
+        for categoria, alpha in self.economics.category_alpha.items():
+            if alpha not in grade_set:
+                msg = (
+                    f"economics.category_alpha[{categoria!r}]={alpha!r} não é um dos "
+                    f"quantis produzidos pelo forecaster (model.quantiles={grade!r}) -- "
+                    "mesmo não estando ligado a nenhuma política ainda, um valor fora da "
+                    "grade quebraria compute_order_quantity assim que essa chave for consumida."
+                )
+                raise ValueError(msg)
+        return self
 
 
 def load_params(path: Path) -> Params:

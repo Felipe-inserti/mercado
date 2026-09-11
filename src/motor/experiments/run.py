@@ -36,6 +36,7 @@ from motor.config import ExperimentArmParams, Params, load_params
 from motor.experiments.shared import build_simulator_for_pair
 from motor.forecast.base import Forecaster
 from motor.forecast.naive import NaiveForecaster
+from motor.forecast.statistical import StatisticalForecaster
 from motor.io.loaders import InputFileManifest, OutputFileManifest
 from motor.metrics.financial import (
     LIMITATIONS,
@@ -47,6 +48,7 @@ from motor.metrics.financial import (
     compute_portfolio_metrics,
 )
 from motor.policy.base import Policy
+from motor.policy.basestock import BasestockPolicy
 from motor.policy.erp_baseline import ErpBaselinePolicy
 from motor.selection import SubsetSelectionResult, select_subset
 
@@ -152,11 +154,21 @@ def _build_forecaster(name: str, params: Params) -> Forecaster:
             params.forecast_naive.moving_average_weeks,
             params.forecast_naive.min_residual_samples,
         )
+    if name == "statistical":
+        return StatisticalForecaster(
+            level_window_weeks=params.forecast_statistical.level_window_weeks,
+            seasonal_window_weeks=params.forecast_statistical.seasonal_window_weeks,
+            min_residual_samples=params.forecast_statistical.min_residual_samples,
+        )
     msg = f"forecaster desconhecido: {name!r}"
     raise ValueError(msg)
 
 
-def _build_policy(name: str, params: Params, *, horizon_days: int) -> Policy:
+def _build_policy(name: str, params: Params, *, horizon_days: int, alpha: float) -> Policy:
+    """`alpha` só é usado pelo braço `basestock` -- `erp_baseline` não deriva
+    nada de quantil (ver docstring de `ErpBaselinePolicy`). Aceito
+    incondicionalmente, em vez de opcional, para que `run_arm` não precise
+    saber qual política vai consumir o valor antes de montá-la."""
     if name == "erp_baseline":
         return ErpBaselinePolicy(
             horizon_days=horizon_days,
@@ -164,6 +176,8 @@ def _build_policy(name: str, params: Params, *, horizon_days: int) -> Policy:
             factor=params.erp_baseline.factor,
             min_order_units=params.erp_baseline.min_order_units,
         )
+    if name == "basestock":
+        return BasestockPolicy(alpha=alpha, expected_window_days=horizon_days)
     msg = f"policy desconhecida: {name!r}"
     raise ValueError(msg)
 
@@ -298,7 +312,12 @@ def run_arm(
         horizon_days = lead_time_days + review_period_days
 
         forecaster = _build_forecaster(arm.forecaster, params)
-        policy = _build_policy(arm.policy, params, horizon_days=horizon_days)
+        policy = _build_policy(
+            arm.policy,
+            params,
+            horizon_days=horizon_days,
+            alpha=params.economics.default_alpha,
+        )
 
         simulator = build_simulator_for_pair(
             demand=demand,
@@ -369,6 +388,21 @@ _BASELINE_COVERAGE_CONTEXT = (
     "baseline está artificialmente ruim."
 )
 
+_BASESTOCK_ALPHA_LIMITATION = (
+    "BasestockPolicy usa economics.default_alpha, UNIFORME para todo item, mesmo com "
+    "economics.category_alpha declarado no config -- decisão explícita da Sprint 12: "
+    "misturar previsão nova (braço 2) com alpha por categoria na mesma mudança destruiria "
+    "a atribuição do ganho financeiro entre os braços 2 e 3 (não daria para saber se a "
+    "diferença de R$ vem da previsão ou do alpha). EFEITO: alpha uniforme deprime o "
+    "resultado em categorias perecíveis de validade curta (alpha adequado seria mais baixo, "
+    "~0.75-0.82, para pesar menos a ruptura frente à perda) e infla o resultado em "
+    "mercearia seca (alpha adequado seria mais alto, ~0.92-0.97). A COMPARAÇÃO ENTRE BRAÇOS "
+    "permanece válida porque o alpha é o mesmo nos três -- o NÍVEL ABSOLUTO de R$ não é "
+    "interpretável por categoria. Remapeamento de category_alpha para as categorias reais "
+    "fica para uma sprint de calibração dedicada, medido isoladamente contra este braço já "
+    "congelado."
+)
+
 _PARAMS_HASH_SCOPE_NOTE = (
     "sha256 de Params inteiro (model_dump_json) -- NÃO é o mesmo hash nem o "
     "mesmo escopo do params_hash em subset_selection.json (esse é só "
@@ -409,6 +443,20 @@ class ErpBaselineCalibrationManifest(BaseModel):
     moving_average_weeks: int
     coverage_days_implied: float
     coverage_context: str
+
+
+class BasestockCalibrationManifest(BaseModel):
+    """Premissas do braço de nível-alvo (Sprint 12) -- registrado no manifesto
+    de TODO braço, independente do que estiver rodando (mesmo padrão de
+    `erp_baseline_calibration`): documenta o que o braço 2 FARIA se fosse o
+    braço ativo, para comparação, não só quando `arm == "estatistico_basestock"`.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    alpha: float
+    alpha_scope: str
+    limitation: str
 
 
 class PortfolioResultsManifest(BaseModel):
@@ -461,6 +509,7 @@ class RunManifest(BaseModel):
     simulation_window: SimulationWindowManifest
     shared_assumptions: dict[str, str]
     erp_baseline_calibration: ErpBaselineCalibrationManifest
+    basestock_calibration: BasestockCalibrationManifest
     financial_assumptions: FinancialAssumptionsManifest
     limitations: list[str]
     results: ResultsManifest
@@ -568,6 +617,14 @@ def _build_manifest(
                 params.erp_baseline.factor * params.forecast_naive.moving_average_weeks * 7
             ),
             coverage_context=_BASELINE_COVERAGE_CONTEXT,
+        ),
+        basestock_calibration=BasestockCalibrationManifest(
+            alpha=params.economics.default_alpha,
+            alpha_scope=(
+                "economics.default_alpha, uniforme para todo item -- economics.category_alpha "
+                "está declarado mas não é consumido nesta sprint (ver EconomicsParams)."
+            ),
+            limitation=_BASESTOCK_ALPHA_LIMITATION,
         ),
         financial_assumptions=FinancialAssumptionsManifest(
             uniform_unit_price=params.economics.uniform_unit_price,

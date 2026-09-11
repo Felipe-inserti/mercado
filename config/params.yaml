@@ -79,6 +79,21 @@ forecast_naive:
   moving_average_weeks: 4
   min_residual_samples: 8 # arbitrado: piso para o backtest de resíduos não degenerar com poucas amostras
 
+forecast_statistical:
+  # Sprint 12: motor.forecast.statistical.StatisticalForecaster. Nível recente
+  # deseasonalizado x índice de sazonalidade semanal (7 índices, por dia ISO),
+  # quantis empíricos dos resíduos do próprio backtest -- ver docstring do
+  # módulo para o modelo completo e para o cuidado com vazamento por feature
+  # global (índice sazonal recalculado a cada candidato de backtest, nunca
+  # uma vez só sobre o histórico inteiro).
+  #
+  # Os três valores abaixo são INDEPENDENTES de forecast_naive -- este modelo
+  # não precisa concordar com nenhuma política sobre o tamanho de janela
+  # (ao contrário de moving_average_weeks, que ErpBaselinePolicy também lê).
+  level_window_weeks: 4 # arbitrado: mesma escala do naive para o nível recente, sem acoplar aos dois
+  seasonal_window_weeks: 12 # arbitrado: ~3 meses, dá >=12 ocorrências de cada dia da semana sem ficar velho demais
+  min_residual_samples: 8 # arbitrado: mesmo piso do naive para o backtest de resíduos não degenerar
+
 erp_baseline:
   # Sprint 7: motor.policy.erp_baseline.ErpBaselinePolicy. Calibração medida
   # sobre dado real (não chutada) -- critério, grade e decisão registrados
@@ -216,14 +231,27 @@ economics:
     CLEANING: 0.30 # arbitrado por analogia (ajustado de 0.28 antes da Sprint 8)
     "HOME CARE": 0.30 # idem
     "PERSONAL CARE": 0.36 # arbitrado por analogia -- higiene/beleza, margem alta típica
-  default_alpha: 0.90 # arbitrado: nível de serviço-alvo (quantil de risco) default
+  default_alpha: 0.90 # arbitrado: nível de serviço-alvo (quantil de risco) default -- é
+    # este valor, sozinho, que motor.policy.basestock.BasestockPolicy usa (Sprint 12,
+    # uniforme para todo item -- ver EconomicsParams). Tem que ser um dos quantis em
+    # model.quantiles abaixo (validado em Params._alpha_bate_com_a_grade_de_quantis).
   category_alpha:
-    # Ainda com as buckets genéricas antigas -- alpha é consumido pela política
-    # basestock (Sprint 11+), fora do escopo da Sprint 8. Não remapeado pelas
-    # categorias reais aqui de propósito; revisitar quando essa sprint chegar.
+    # NÃO WIREADO (Sprint 12): chaves são placeholders genéricos que NÃO
+    # correspondem a Item.category real do subconjunto de trabalho (GROCERY I,
+    # DAIRY, etc. -- mesmo problema que category_margin_pct tinha antes do
+    # remapeamento da Sprint 8). Nenhuma política lê este dict hoje --
+    # BasestockPolicy usa só default_alpha, uniforme, de propósito (ver
+    # EconomicsParams: misturar previsão nova com alpha por categoria na mesma
+    # sprint destruiria a atribuição do ganho entre os braços). Remapeamento
+    # pendente de uma sprint de calibração dedicada. Mesmo inerte, todo valor
+    # aqui é validado contra model.quantiles -- um valor fora da grade quebraria
+    # compute_order_quantity no instante em que a chave for finalmente ligada.
     hortifruti: 0.80 # arbitrado: perecível, menor alpha pesa menos a ruptura frente à perda
     mercearia: 0.90
-    bebidas: 0.92
+    bebidas: 0.90 # corrigido de 0.92 (Sprint 12): 0.92 não é um quantil em model.quantiles
+      # abaixo -- ficaria fora da grade e estouraria compute_order_quantity assim que
+      # esta chave fosse consumida por alguma política; sem medição nova, 0.90 (o
+      # vizinho mais próximo na grade atual) é o valor menos arbitrário disponível
     limpeza: 0.90
 
 guardrails:
