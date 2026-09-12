@@ -156,10 +156,11 @@ STOCK_PRIMARY_KEY: Final = ("store_id", "item_id", "date")
 class Item(TableRow):
     """Uma linha de cadastro no grão item.
 
-    `ean`, `pack_multiple`, `cost` e `price_ref` são nuláveis porque o
-    dataset público não os tem. Depois da arbitragem (sprint futura), passam
-    a ser obrigatórios: use `required_non_null` em `validate_table` para
-    essa transição, sem reabrir este contrato.
+    `ean`, `pack_multiple` são nuláveis porque o dataset público não os tem.
+    Depois da arbitragem (sprint futura), passam a ser obrigatórios: use
+    `required_non_null` em `validate_table` para essa transição, sem reabrir
+    este contrato -- é exatamente o que a Sprint 16.5 (Etapa 3.2) fez com
+    `cost`/`price_ref` abaixo, o primeiro campo a fazer essa travessia.
 
     `pack_multiple` mora aqui, não em `suppliers`: é propriedade do SKU, não
     do fornecedor -- dois itens do mesmo fornecedor podem ter fardos
@@ -173,6 +174,16 @@ class Item(TableRow):
     inventar um proxy (por volume, por exemplo) que atribuiria significado de
     negócio que o dado não carrega. Ficam `null` até a arbitragem com dado
     real de um cliente.
+
+    `cost`/`price_ref` (Sprint 16.5, Etapa 3.2): eram `null` pela mesma razão
+    D7 acima -- Favorita não tem custo nem preço -- e agora são
+    `required_non_null` em `validate_table(items_df, Item, ...)`, DERIVADOS
+    da premissa de margem por categoria (`motor.io.loaders.load_items`).
+    `economics_origin` é obrigatório e viaja com o valor: um leitor do
+    parquet, sem abrir manifesto nenhum, vê ali mesmo que a coluna é
+    arbitrada, não observada -- é a razão inteira de a Etapa 3.1
+    (`motor.assumptions`) existir aplicada ao próprio dado, não só ao
+    registro em separado.
     """
 
     item_id: str
@@ -187,6 +198,7 @@ class Item(TableRow):
     is_anchor: bool | None = None
     cost: NonNegativeFloat | None = None
     price_ref: NonNegativeFloat | None = None
+    economics_origin: str
 
 
 ITEMS_PRIMARY_KEY: Final = ("item_id",)

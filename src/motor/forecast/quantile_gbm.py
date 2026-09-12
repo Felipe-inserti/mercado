@@ -54,7 +54,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date, timedelta
 from pathlib import Path
@@ -223,17 +223,29 @@ def compute_config_hash(
     quantiles: Sequence[float],
     store_id: str,
     item_ids: Sequence[str],
+    horizon_by_item: Mapping[str, int],
 ) -> str:
     """Hash determinístico de TUDO que afeta o resultado do treino -- a chave
     de cache inclui isto, não só a data de retreino (a forma mais fácil de
     produzir resultado falso e reprodutível é reusar um modelo treinado com
-    outra config)."""
+    outra config).
+
+    `horizon_by_item` (achado na revisão da Sprint 16: faltava aqui) entra
+    duas vezes dentro de `train_quantile_models` -- no ALVO de treino
+    (`target_for_origin`, demanda acumulada na janela de risco) e na feature
+    `RISK_WINDOW_FEATURE` -- então muda o resultado do treino tanto quanto
+    `hyperparams`/`features_params`. Sem isto na chave, dois treinos com
+    `lead_time` diferente (portanto horizonte diferente) mas mesmo
+    `store_id`/`item_ids`/`quantiles`/hiperparâmetros colidiam no mesmo
+    diretório de cache -- exatamente o cenário de uma varredura de
+    sensibilidade em `lead_time` (Sprint 16)."""
     payload = {
         "quantile_gbm": hyperparams.model_dump(mode="json", exclude={"model_cache_dir"}),
         "features": features_params.model_dump(mode="json"),
         "quantiles": list(quantiles),
         "store_id": store_id,
         "item_ids": sorted(item_ids),
+        "horizon_by_item": dict(sorted(horizon_by_item.items())),
     }
     encoded = json.dumps(payload, sort_keys=True).encode("utf-8")
     return hashlib.sha256(encoded).hexdigest()
@@ -459,45 +471,137 @@ def train_quantile_models(
 
 
 # --------------------------------------------------------------------------
+# previsão em lote (Sprint 16: batching de `booster.predict()`)
+# --------------------------------------------------------------------------
+
+
+def precompute_predictions(
+    sales: pl.DataFrame,
+    items: pl.DataFrame,
+    *,
+    store_id: str,
+    item_ids: Sequence[str],
+    horizon_by_item: Mapping[str, int],
+    review_period_by_item: Mapping[str, int],
+    decision_dates: Sequence[date],
+    quantiles: Sequence[float],
+    features_params: FeaturesParams,
+    calendar_locale: StoreLocale,
+    holidays: pl.DataFrame,
+    registry: QuantileModelRegistry,
+) -> dict[str, dict[date, dict[float, float]]]:
+    """Pré-computa TODA previsão que o braço 3 vai pedir durante a simulação
+    -- uma por (item_id, as_of) em `item_ids` x `decision_dates` -- ANTES do
+    loop por item de `run_arm`, mesmo padrão arquitetural de
+    `train_quantile_models` (treino também acontece uma vez, fora do loop
+    por item -- ver docstring do módulo). `QuantileGbmForecaster` não
+    computa mais nada em `predict_quantiles`: só consulta este dicionário.
+
+    ACHADO da revisão da Sprint 16 (perfil de uma data de decisão real, 275
+    itens): o custo de `booster.predict()` é dominado por overhead FIXO por
+    chamada (atravessar a fronteira Python/C++, validar o array), não por
+    travessia de árvore -- uma previsão em lote (N itens de uma vez) é até
+    270x mais rápida que N chamadas de uma linha, com saída IDÊNTICA bit a
+    bit (`np.array_equal`, não só `allclose`; LightGBM não reduz nada entre
+    linhas na predição, só no treino -- provado em
+    `tests/test_quantile_gbm.py::test_predict_em_lote_bate_bit_a_bit_com_loop`).
+    Por isso este código constrói as features EXATAMENTE como antes -- item
+    por item, mesmo `build_features`/`build_calendar_features`, mesmo custo
+    de `.collect()` do polars (~63% do tempo de uma data, medido; é dívida
+    técnica REGISTRADA, não atacada aqui -- mudar isso é mudar a lógica de
+    `motor.features.build`, fora do escopo desta sprint) -- e só empilha as
+    linhas resultantes ANTES de chamar `booster.predict()`, uma vez por
+    quantil em vez de uma vez por item.
+
+    `decision_dates` PRECISA ser exatamente a grade de dias em que o
+    `Simulator` de cada item vai pedir previsão
+    (`motor.simulator.engine.review_every_n_days(reference=simulation.start_date,
+    period_days=review_period_days)`) -- hoje isso coincide com
+    `model.retrain_cadence_days` porque as duas grades têm o mesmo período e
+    a mesma referência (`review_period_by_item` uniforme e igual a
+    `retrain_cadence_days` no subconjunto real, confirmado abaixo, não
+    assumido). Se algum item tiver `review_period_days` diferente dos
+    demais, este código recusa rodar -- silenciosamente supor uma grade
+    única quando ela não é mais única produziria `as_of` sem previsão
+    pré-computada para alguns itens, e `QuantileGbmForecaster.predict_quantiles`
+    percorreria a decisão errada sem avisar."""
+    valores_review = {review_period_by_item[i] for i in item_ids}
+    if len(valores_review) > 1:
+        msg = (
+            f"review_period_by_item não é uniforme ({sorted(valores_review)!r}) -- "
+            "precompute_predictions assume UMA grade de decision_dates compartilhada "
+            "por todos os itens (ver docstring). Itens com review_period diferente "
+            "pedem previsão em dias diferentes; pré-computar com uma grade única "
+            "deixaria alguns sem previsão pronta na hora certa."
+        )
+        raise ValueError(msg)
+
+    item_sales_by_item = {i: sales.filter(pl.col("item_id") == i) for i in item_ids}
+    predictions: dict[str, dict[date, dict[float, float]]] = {i: {} for i in item_ids}
+
+    for as_of in sorted(decision_dates):
+        booster_set = registry.for_as_of(as_of)
+        disponiveis = set(booster_set.boosters)
+        faltando = [q for q in quantiles if q not in disponiveis]
+        if faltando:
+            msg = (
+                f"quantil(is) {faltando} fora da grade treinada ({sorted(disponiveis)}) -- "
+                "sem interpolação silenciosa: ajuste model.quantiles ou o alpha pedido."
+            )
+            raise ValueError(msg)
+        feature_cols = list(booster_set.feature_cols)
+
+        rows = []
+        for item_id in item_ids:
+            calendar = build_calendar_features(
+                [as_of], locale=calendar_locale, holidays=holidays, params=features_params.calendar
+            )
+            row = build_features(
+                item_sales_by_item[item_id],
+                items,
+                as_of,
+                store_id=store_id,
+                calendar=calendar,
+                params=features_params,
+                item_ids=[item_id],
+            ).with_columns(pl.lit(horizon_by_item[item_id]).alias(RISK_WINDOW_FEATURE))
+            rows.append(row)
+        stacked = pl.concat(rows)
+        encoded = registry.categorical_encoding.encode(stacked.select(*feature_cols))
+        x = encoded.to_numpy()
+
+        raw_by_quantile = {q: booster_set.boosters[q].predict(x) for q in quantiles}
+        for i, item_id in enumerate(item_ids):
+            raw = {q: float(raw_by_quantile[q][i]) for q in quantiles}
+            corrected = registry.correction.apply(raw)
+            predictions[item_id][as_of] = {q: max(0.0, corrected[q]) for q in quantiles}
+
+    return predictions
+
+
+# --------------------------------------------------------------------------
 # adaptador por par loja-item (protocolo `Forecaster` reduzido)
 # --------------------------------------------------------------------------
 
 
 class QuantileGbmForecaster:
     """`Forecaster` (protocolo reduzido, grão de um par loja-item) que
-    CONSULTA um `QuantileModelRegistry` já treinado -- não treina nada em
-    `fit()`. Ver docstring do módulo para o porquê.
-
-    `item_sales`: fatia COMPLETA (todas as colunas canônicas, inclusive
-    `on_promo`) deste item -- não o `history` reduzido que `fit()` recebe do
-    simulador (só `date`/`units_sold`, insuficiente para `motor.features`).
-    Isso é uma injeção de construtor deliberada, não um contorno do
-    protocolo: `fit()`/`predict_quantiles()` continuam com a assinatura exata
-    de `motor.forecast.base.Forecaster`.
+    CONSULTA previsões já pré-computadas em lote (`precompute_predictions`,
+    Sprint 16) -- não treina nem prevê nada em `fit()`/`predict_quantiles()`,
+    só faz `lookup`. Ver docstring do módulo (arquitetura) e de
+    `precompute_predictions` (por que o lote existe) para o porquê.
     """
 
     def __init__(
         self,
         *,
-        store_id: str,
         item_id: str,
-        item_sales: pl.DataFrame,
-        items_catalog: pl.DataFrame,
         expected_horizon: int,
-        registry: QuantileModelRegistry,
-        calendar_locale: StoreLocale,
-        holidays: pl.DataFrame,
-        features_params: FeaturesParams,
+        precomputed: Mapping[date, dict[float, float]],
     ) -> None:
-        self._store_id = store_id
         self._item_id = item_id
-        self._item_sales = item_sales
-        self._items_catalog = items_catalog
         self._expected_horizon = expected_horizon
-        self._registry = registry
-        self._calendar_locale = calendar_locale
-        self._holidays = holidays
-        self._features_params = features_params
+        self._precomputed = precomputed
         self._as_of: date | None = None
 
     def fit(self, history: pl.DataFrame, as_of: date) -> None:
@@ -525,38 +629,24 @@ class QuantileGbmForecaster:
                 "não pode ser consumida aqui."
             )
             raise ValueError(msg)
-
-        booster_set = self._registry.for_as_of(as_of)
-        disponiveis = set(booster_set.boosters)
-        faltando = [q for q in quantiles if q not in disponiveis]
-        if faltando:
+        if as_of not in self._precomputed:
             msg = (
-                f"quantil(is) {faltando} fora da grade treinada ({sorted(disponiveis)}) -- "
-                "sem interpolação silenciosa: ajuste model.quantiles ou o alpha pedido."
+                f"item {self._item_id!r}: nenhuma previsão pré-computada para as_of={as_of!r} "
+                f"(datas disponíveis: {sorted(self._precomputed)!r}). "
+                "predict_quantiles não calcula mais nada na hora (Sprint 16, batching) -- "
+                "isto significa que decision_dates passado a precompute_predictions não "
+                "cobriu todo dia em que o Simulator pede decisão para este item. Não "
+                "interpolar/recalcular aqui: corrija a grade de decision_dates."
             )
             raise ValueError(msg)
 
-        calendar = build_calendar_features(
-            [as_of],
-            locale=self._calendar_locale,
-            holidays=self._holidays,
-            params=self._features_params.calendar,
-        )
-        row = build_features(
-            self._item_sales,
-            self._items_catalog,
-            as_of,
-            store_id=self._store_id,
-            calendar=calendar,
-            params=self._features_params,
-            item_ids=[self._item_id],
-        ).with_columns(pl.lit(horizon).alias(RISK_WINDOW_FEATURE))
-
-        feature_cols = list(booster_set.feature_cols)
-        encoded = self._registry.categorical_encoding.encode(row.select(*feature_cols))
-        x = encoded.to_numpy()
-
-        raw = {q: float(booster_set.boosters[q].predict(x)[0]) for q in quantiles}
-        corrected = self._registry.correction.apply(raw)
-        values = [max(0.0, corrected[q]) for q in quantiles]
+        corrected = self._precomputed[as_of]
+        faltando = [q for q in quantiles if q not in corrected]
+        if faltando:
+            msg = (
+                f"quantil(is) {faltando} fora da grade treinada ({sorted(corrected)}) -- "
+                "sem interpolação silenciosa: ajuste model.quantiles ou o alpha pedido."
+            )
+            raise ValueError(msg)
+        values = [corrected[q] for q in quantiles]
         return pl.DataFrame({"quantile": quantiles, "value": values})

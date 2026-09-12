@@ -314,7 +314,16 @@ features:
     - is_perishable
 
 model:
-  quantiles: [0.5, 0.8, 0.9, 0.95] # arbitrado: cobre mediana e a faixa alta de risco de ruptura
+  # Estendido na Sprint 16 (0.70 e 0.85 acrescentados) para caber a grade de alpha
+  # da varredura de sensibilidade -- economics.default_alpha (e qualquer alpha usado
+  # numa célula da varredura) tem que ser um dos valores aqui (Params._alpha_bate_
+  # com_a_grade_de_quantis). 0.70 é o ponto que testa a hipótese central da sprint
+  # (inversão do resultado em alpha mais baixo); cortar o eixo para caber na grade
+  # antiga seria ajustar a pergunta à ferramenta, não medir. Cada booster do braço 3
+  # é treinado independente (pinball loss no seu próprio quantil, ver quantile_gbm.py)
+  # -- acrescentar dois quantis não pode mudar as previsões dos quatro originais;
+  # verificado por regressão contra a Sprint 15 antes de aceitar a extensão.
+  quantiles: [0.5, 0.70, 0.80, 0.85, 0.9, 0.95]
   retrain_cadence_days: 7 # semanal, conforme CLAUDE.md seção 8 (re-treino diário é inviável e desnecessário)
 
 quantile_gbm:

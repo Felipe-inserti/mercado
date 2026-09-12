@@ -12,7 +12,9 @@ from pathlib import Path
 
 import polars as pl
 import pytest
+from pydantic import ValidationError
 
+from motor.assumptions import AssumptionOrigin
 from motor.config import (
     CanonicalParams,
     Params,
@@ -21,18 +23,24 @@ from motor.config import (
     load_params,
 )
 from motor.experiments.run import (
+    ExistingResultError,
+    RunManifest,
     StaleSubsetSelectionError,
     _build_forecaster,
     _build_manifest,
     _build_policy,
     _find_arm,
+    _quantile_gbm_retrain_dates,
     _selection_params_hash,
     load_or_select_subset,
     run_arm,
+    run_arm_and_save,
 )
+from motor.experiments.sensitivity import build_cell_params
 from motor.forecast.statistical import StatisticalForecaster
 from motor.policy.basestock import BasestockPolicy
 from motor.selection import SubsetSelectionResult
+from motor.simulator.engine import review_every_n_days
 
 PARAMS_PATH = Path(__file__).resolve().parent.parent / "config" / "params.yaml"
 
@@ -503,3 +511,238 @@ def test_build_manifest_e_json_serializavel_com_chaves_ordenadas(tmp_path: Path)
     encoded = json.dumps(manifest.model_dump(mode="json"), sort_keys=True, ensure_ascii=False)
     decoded = json.loads(encoded)
     assert decoded["arm"] == "erp_baseline"
+
+
+def test_build_manifest_registra_grade_de_quantis_ativa(tmp_path: Path) -> None:
+    """Sprint 16: `active_quantiles` presente em TODO manifesto (mesmo padrão
+    de `basestock_calibration`), não só quando `forecaster == 'quantile_gbm'`
+    -- é o campo que permite checar se dois manifestos de braço 3 são
+    comparáveis entre si (ver `QuantileGbmDiagnosticsManifest.grid_coupling_note`,
+    achado do acoplamento por rank na correção de não-cruzamento)."""
+    sales, items, suppliers, params = _cenario_dois_itens()
+    result = SubsetSelectionResult(store_id="S1", item_ids=("I1", "I2"), funnel=pl.DataFrame())
+    cache_path = _cache_path_pre_populado(tmp_path, params, result)
+    canonical_dir = _canonical_dir_com_parquets(
+        tmp_path, sales=sales, items=items, suppliers=suppliers
+    )
+
+    saida = run_arm(
+        "erp_baseline",
+        params,
+        sales=sales,
+        items=items,
+        suppliers=suppliers,
+        stock=_EMPTY_STOCK,
+        subset_cache_path=cache_path,
+    )
+    events_path = tmp_path / "events.parquet"
+    item_metrics_path = tmp_path / "item_metrics.parquet"
+    saida.events.write_parquet(events_path)
+    saida.item_metrics.write_parquet(item_metrics_path)
+
+    manifest = _build_manifest(
+        "erp_baseline",
+        params,
+        saida,
+        canonical_dir=canonical_dir,
+        events_path=events_path,
+        item_metrics_path=item_metrics_path,
+        execution_seconds=1.23,
+    )
+
+    assert manifest.active_quantiles == list(params.model.quantiles)
+
+
+def test_build_manifest_inclui_registro_de_premissas(tmp_path: Path) -> None:
+    """Sprint 16.5, Etapa 3.1: `assumptions` é campo obrigatório de
+    `RunManifest` -- presente e com a origem certa nas 8 premissas
+    exigidas."""
+    sales, items, suppliers, params = _cenario_dois_itens()
+    result = SubsetSelectionResult(store_id="S1", item_ids=("I1", "I2"), funnel=pl.DataFrame())
+    cache_path = _cache_path_pre_populado(tmp_path, params, result)
+    canonical_dir = _canonical_dir_com_parquets(
+        tmp_path, sales=sales, items=items, suppliers=suppliers
+    )
+
+    saida = run_arm(
+        "erp_baseline",
+        params,
+        sales=sales,
+        items=items,
+        suppliers=suppliers,
+        stock=_EMPTY_STOCK,
+        subset_cache_path=cache_path,
+    )
+    events_path = tmp_path / "events.parquet"
+    item_metrics_path = tmp_path / "item_metrics.parquet"
+    saida.events.write_parquet(events_path)
+    saida.item_metrics.write_parquet(item_metrics_path)
+
+    manifest = _build_manifest(
+        "erp_baseline",
+        params,
+        saida,
+        canonical_dir=canonical_dir,
+        events_path=events_path,
+        item_metrics_path=item_metrics_path,
+        execution_seconds=1.23,
+    )
+
+    default_lead_time = params.supplier_assumptions.default_lead_time_days
+    assert manifest.assumptions.lead_time_days.valor == default_lead_time
+    assert manifest.assumptions.lead_time_days.origem == AssumptionOrigin.ARBITRADO
+
+
+def test_run_manifest_sem_registro_de_premissas_falha_explicito(tmp_path: Path) -> None:
+    """`assumptions` não tem default -- gravar um manifesto sem o registro
+    completo tem que falhar alto e claro (pydantic recusa a validação),
+    nunca produzir um resultado incompleto em silêncio."""
+    sales, items, suppliers, params = _cenario_dois_itens()
+    result = SubsetSelectionResult(store_id="S1", item_ids=("I1", "I2"), funnel=pl.DataFrame())
+    cache_path = _cache_path_pre_populado(tmp_path, params, result)
+    canonical_dir = _canonical_dir_com_parquets(
+        tmp_path, sales=sales, items=items, suppliers=suppliers
+    )
+
+    saida = run_arm(
+        "erp_baseline",
+        params,
+        sales=sales,
+        items=items,
+        suppliers=suppliers,
+        stock=_EMPTY_STOCK,
+        subset_cache_path=cache_path,
+    )
+    events_path = tmp_path / "events.parquet"
+    item_metrics_path = tmp_path / "item_metrics.parquet"
+    saida.events.write_parquet(events_path)
+    saida.item_metrics.write_parquet(item_metrics_path)
+
+    manifest = _build_manifest(
+        "erp_baseline",
+        params,
+        saida,
+        canonical_dir=canonical_dir,
+        events_path=events_path,
+        item_metrics_path=item_metrics_path,
+        execution_seconds=1.23,
+    )
+    incompleto = manifest.model_dump(mode="json")
+    del incompleto["assumptions"]
+
+    with pytest.raises(ValidationError, match="assumptions"):
+        RunManifest.model_validate(incompleto)
+
+
+def test_retrain_dates_bate_exato_com_dias_de_decisao_do_simulador_review_period_variado() -> None:
+    """Sprint 16.5, Etapa 3.5: achado da revisão -- `_quantile_gbm_retrain_dates`
+    (usada tanto para as datas de retreino do braço 3 quanto para as
+    `decision_dates` de `precompute_predictions`) e o calendário de revisão
+    real do `Simulator` (`review_every_n_days`) são DUAS implementações
+    separadas. Para `review_period_days=14` (varredura dirigida da Etapa
+    3.4), elas têm que concordar EXATAMENTE -- comparação de CONJUNTO, não
+    de contagem: um desvio de um dia com a mesma quantidade de datas não
+    apareceria comparando só `len()`."""
+    base = load_params(PARAMS_PATH)
+    cell_params = build_cell_params(
+        base, alpha=base.economics.default_alpha, review_period_days=14
+    )
+    # build_cell_params amarra retrain_cadence_days a review_period_days -- checagem
+    # explícita de que não sobrou nenhum "7" fixo no caminho.
+    assert cell_params.model.retrain_cadence_days == 14
+
+    obtido = set(_quantile_gbm_retrain_dates(cell_params))
+
+    is_review_day = review_every_n_days(reference=cell_params.simulation.start_date, period_days=14)
+    esperado: set[date] = set()
+    dia = cell_params.simulation.start_date
+    while dia <= cell_params.simulation.end_date:
+        if is_review_day(dia):
+            esperado.add(dia)
+        dia += timedelta(days=1)
+
+    assert obtido, "janela de teste vazia -- ajuste params.yaml de teste, não a asserção"
+    assert obtido == esperado
+
+
+def test_sem_a_amarracao_o_retreino_desperdica_o_dobro_de_datas() -> None:
+    """Prova, por contraste, o que a amarração em `build_cell_params` evita
+    -- e corrige uma previsão errada que eu fiz ao propor o teste anterior.
+
+    Para `review_period_days=14` especificamente, 14 é múltiplo de 7
+    (`retrain_cadence_days` default): sem a amarração, as datas de decisão
+    reais (a cada 14 dias) são SUBCONJUNTO das datas de retreino
+    desamarradas (a cada 7 dias, começando na mesma referência) -- então o
+    guarda `as_of not in self._precomputed` NÃO estouraria neste caso
+    específico (todo `as_of` pedido já estaria no cache). O problema real
+    sem a amarração não é uma exceção aqui -- é `_build_quantile_gbm_registry`
+    treinar e pré-computar em 2x mais datas do que o Simulator jamais vai
+    consultar, desperdício puro. (O guarda estouraria de verdade para um
+    `review_period_days` que NÃO fosse múltiplo do `retrain_cadence_days`
+    default, ex. 10 -- fora da grade desta etapa, mas é a razão de a
+    amarração ser regra geral, não um remendo só para 14.)
+    """
+    base = load_params(PARAMS_PATH)
+    sem_amarracao = base.model_copy(
+        update={"model": base.model.model_copy(update={"retrain_cadence_days": 7})}
+    )
+
+    datas_retreino_desamarradas = set(_quantile_gbm_retrain_dates(sem_amarracao))
+    is_review_day_14 = review_every_n_days(reference=base.simulation.start_date, period_days=14)
+    datas_decisao_reais: set[date] = set()
+    dia = base.simulation.start_date
+    while dia <= base.simulation.end_date:
+        if is_review_day_14(dia):
+            datas_decisao_reais.add(dia)
+        dia += timedelta(days=1)
+
+    # não estoura o guarda neste caso (14 é múltiplo de 7) -- mas desperdiça o dobro
+    assert datas_decisao_reais.issubset(datas_retreino_desamarradas)
+    assert len(datas_retreino_desamarradas) == pytest.approx(2 * len(datas_decisao_reais), abs=1)
+
+
+def test_build_cell_params_sem_review_period_nao_toca_retrain_cadence() -> None:
+    """Retrocompatibilidade: a varredura de 75 células já aprovada não passa
+    `review_period_days` -- `model.retrain_cadence_days` tem que continuar
+    exatamente o valor de `params.yaml`, sem surpresa."""
+    base = load_params(PARAMS_PATH)
+    cell_params = build_cell_params(base, alpha=base.economics.default_alpha)
+    assert cell_params.model.retrain_cadence_days == base.model.retrain_cadence_days
+
+
+def test_run_arm_and_save_recusa_sobrescrever_sem_force(tmp_path: Path) -> None:
+    """Sprint 16 (revisão): `results/` não é versionado -- rodar de novo em
+    cima de um manifesto já gravado sem `force=True` tem que recusar,
+    explícito, em vez de sobrescrever em silêncio (é o que já aconteceu de
+    verdade nesta sprint, antes desta guarda existir)."""
+    sales, items, suppliers, params = _cenario_dois_itens()
+    result = SubsetSelectionResult(store_id="S1", item_ids=("I1", "I2"), funnel=pl.DataFrame())
+    cache_path = _cache_path_pre_populado(tmp_path, params, result)
+    canonical_dir = _canonical_dir_com_parquets(
+        tmp_path, sales=sales, items=items, suppliers=suppliers
+    )
+    results_dir = tmp_path / "results"
+
+    def _run(*, force: bool = False) -> RunManifest:
+        return run_arm_and_save(
+            "erp_baseline",
+            params,
+            sales=sales,
+            items=items,
+            suppliers=suppliers,
+            stock=_EMPTY_STOCK,
+            subset_cache_path=cache_path,
+            canonical_dir=canonical_dir,
+            results_dir=results_dir,
+            force=force,
+        )
+
+    primeiro = _run()
+    assert (results_dir / "erp_baseline" / "manifest.json").exists()
+
+    with pytest.raises(ExistingResultError):
+        _run()
+
+    # force=True sobrescreve normalmente, sem levantar
+    segundo = _run(force=True)
+    assert segundo.results.portfolio.decision_metric == primeiro.results.portfolio.decision_metric

@@ -56,7 +56,7 @@ from motor.io.raw import scan_raw
 from motor.profiling import profile_fractional_by_item, profile_store_lifespan
 
 _CANONICAL_TABLES: Final = ("sales", "items", "suppliers", "stock")
-CANONICAL_SCHEMA_VERSION: Final = 1
+CANONICAL_SCHEMA_VERSION: Final = 2  # v2 (Sprint 16.5): items.cost/price_ref deixam de ser null
 
 # Campos de `Sale` que a checagem streaming de `sales` (`_validate_sales_streaming`)
 # exige não-nulos: os obrigatórios do contrato (sem `| None`) mais `units_returned`,
@@ -428,12 +428,26 @@ def load_sales(
 # --------------------------------------------------------------------------
 
 
+ECONOMICS_ORIGIN_ARBITRADO: Final = (
+    "arbitrado: cost = uniform_unit_price x (1 - category_margin_pct[categoria] "
+    "ou default_margin_pct); price_ref = uniform_unit_price. Nenhum dos dois é "
+    "observado -- o Favorita não tem custo nem preço no bruto (D7). Mesma "
+    "fórmula de motor.metrics.financial.build_item_economics -- ver "
+    "motor.assumptions (Sprint 16.5, Etapa 3.1) para o registro completo de "
+    "premissas e tests/test_loaders.py::test_items_cost_e_price_ref_batem_com_"
+    "build_item_economics para a prova de equivalência entre as duas camadas."
+)
+
+
 def load_items(
     items_raw: pl.LazyFrame,
     sales_raw: pl.LazyFrame,
     *,
     fractional_threshold: float,
     default_pack_multiple: float,
+    uniform_unit_price: float,
+    category_margin_pct: dict[str, float],
+    default_margin_pct: float,
 ) -> pl.DataFrame:
     """`items.csv` bruto + `fractional_ratio` medido em `sales_raw` -> tabela `items` canônica.
 
@@ -450,15 +464,29 @@ def load_items(
     o join -- classificado como `unidade` (ausência de evidência de venda
     fracionária não é evidência de peso).
 
-    `ean`, `description`, `cost`, `price_ref` ficam sempre `null`: o Favorita
-    não tem esses dados (D7). `is_anchor` também fica `null` -- decisão
-    explícita de não inventar um proxy (por volume, por exemplo) que
-    atribuiria significado de negócio que o dado não carrega.
-    """
+    `ean`, `description` ficam sempre `null`: o Favorita não tem esses dados
+    (D7). `is_anchor` também fica `null` -- decisão explícita de não inventar
+    um proxy (por volume, por exemplo) que atribuiria significado de negócio
+    que o dado não carrega.
+
+    `cost`/`price_ref` (Sprint 16.5, Etapa 3.2 -- ANTES ficavam `null` pela
+    mesma razão D7 acima) agora são DERIVADOS da premissa de margem por
+    categoria -- `economics_origin` viaja junto, sempre preenchido, dizendo
+    exatamente isso: um leitor do parquet não pode confundir coluna
+    preenchida com coluna medida. A fórmula é idêntica, célula a célula, à
+    de `motor.metrics.financial.build_item_economics` -- resultado
+    matematicamente igual, não só parecido (testado)."""
     families = items_raw.select("family").unique().collect(engine="streaming")["family"].to_list()
     family_to_supplier_id = _build_family_to_supplier_id(families)
 
     fractional = profile_fractional_by_item(sales_raw).select("item_nbr", "fractional_ratio").lazy()
+    margin_table = pl.LazyFrame(
+        {
+            "category": list(category_margin_pct.keys()),
+            "margin_pct": list(category_margin_pct.values()),
+        },
+        schema={"category": pl.String, "margin_pct": pl.Float64},
+    )
 
     return (
         items_raw.join(fractional, on="item_nbr", how="left")
@@ -476,8 +504,13 @@ def load_items(
             pl.lit(default_pack_multiple).alias("pack_multiple"),
             pl.col("perishable").cast(pl.Boolean).alias("is_perishable"),
             pl.lit(None, dtype=pl.Boolean).alias("is_anchor"),
-            pl.lit(None, dtype=pl.Float64).alias("cost"),
-            pl.lit(None, dtype=pl.Float64).alias("price_ref"),
+        )
+        .join(margin_table, on="category", how="left")
+        .with_columns(pl.col("margin_pct").fill_null(default_margin_pct))
+        .with_columns(
+            pl.lit(uniform_unit_price).alias("price_ref"),
+            (pl.lit(uniform_unit_price) * (1.0 - pl.col("margin_pct"))).alias("cost"),
+            pl.lit(ECONOMICS_ORIGIN_ARBITRADO).alias("economics_origin"),
         )
         .select(
             "item_id",
@@ -492,6 +525,7 @@ def load_items(
             "is_anchor",
             "cost",
             "price_ref",
+            "economics_origin",
         )
         .sort("item_id")
         .collect(engine="streaming")
@@ -657,8 +691,17 @@ def build_canonical_favorita(
         windowed_train_raw,
         fractional_threshold=canonical.fractional_threshold,
         default_pack_multiple=params.supplier_assumptions.default_pack_multiple,
+        uniform_unit_price=params.economics.uniform_unit_price,
+        category_margin_pct=dict(params.economics.category_margin_pct),
+        default_margin_pct=params.economics.default_margin_pct,
     )
-    validate_table(items_df, Item, table_name="items", primary_key=ITEMS_PRIMARY_KEY)
+    validate_table(
+        items_df,
+        Item,
+        table_name="items",
+        primary_key=ITEMS_PRIMARY_KEY,
+        required_non_null=frozenset({"cost", "price_ref"}),
+    )
     items_df.write_parquet(table_paths["items"])
 
     suppliers_df = load_suppliers(items_raw, supplier_assumptions=params.supplier_assumptions)
@@ -695,6 +738,7 @@ def build_canonical_favorita(
     active_params = {
         "canonical": canonical.model_dump(mode="json"),
         "supplier_assumptions": params.supplier_assumptions.model_dump(mode="json"),
+        "economics": params.economics.model_dump(mode="json"),
     }
     params_hash = hashlib.sha256(params.model_dump_json().encode("utf-8")).hexdigest()
 

@@ -45,6 +45,7 @@ from motor.io.loaders import (
     load_suppliers,
 )
 from motor.io.raw import convert_raw_to_parquet
+from motor.metrics.financial import build_item_economics
 
 PARAMS_PATH = Path(__file__).resolve().parent.parent / "config" / "params.yaml"
 
@@ -78,6 +79,18 @@ def _sales_raw(
             "onpromotion": pl.Boolean,
         },
     ).lazy()
+
+
+def _economics_kwargs(**overrides: object) -> dict[str, object]:
+    """Kwargs de `load_items` para `cost`/`price_ref` (Sprint 16.5, Etapa 3.2)
+    -- valores de teste simples, não os de `params.yaml` real."""
+    base: dict[str, object] = {
+        "uniform_unit_price": 10.0,
+        "category_margin_pct": {"BREAD/BAKERY": 0.32},
+        "default_margin_pct": 0.25,
+    }
+    base.update(overrides)
+    return base
 
 
 def _items_raw(
@@ -635,7 +648,9 @@ def test_d5_classificacao_un_kg_e_fronteira_do_limiar() -> None:
             1.5,  # item 4: só uma venda, fracionária -- não serve sozinho para o limite exato
         ],
     )
-    result = load_items(items, sales, fractional_threshold=0.5, default_pack_multiple=1.0)
+    result = load_items(
+        items, sales, fractional_threshold=0.5, default_pack_multiple=1.0, **_economics_kwargs()
+    )
     by_item = {row["item_id"]: row["unit_of_sale"] for row in result.to_dicts()}
 
     assert by_item["1"] == "unidade"  # ratio 0.0
@@ -650,7 +665,11 @@ def test_d5_classificacao_un_kg_e_fronteira_do_limiar() -> None:
         ]
     )
     result_boundary = load_items(
-        items, boundary_sales, fractional_threshold=0.5, default_pack_multiple=1.0
+        items,
+        boundary_sales,
+        fractional_threshold=0.5,
+        default_pack_multiple=1.0,
+        **_economics_kwargs(),
     )
     by_item_boundary = {row["item_id"]: row["unit_of_sale"] for row in result_boundary.to_dicts()}
     assert by_item_boundary["4"] == "kg"  # ratio exatamente 0.5 == limiar -> kg (>=, inclusivo)
@@ -691,22 +710,73 @@ def test_d6_onpromotion_nulo_so_nas_linhas_sem_dado_bruto() -> None:
 # --------------------------------------------------------------------------
 
 
-def test_d7_items_campos_inexistentes_ficam_nulos() -> None:
+def test_d7_campos_sem_dado_real_ficam_nulos_cost_e_price_ref_nao_mais() -> None:
+    """Renomeado na Sprint 16.5 (Etapa 3.2): `ean`/`description`/`is_anchor`
+    continuam nulos pela razão D7 original (Favorita não tem esse dado, sem
+    proxy inventado). `cost`/`price_ref` NÃO -- passaram a ser derivados da
+    premissa de margem por categoria, e `economics_origin` declara isso."""
     items = _items_raw(item_nbr=[1], family=["BREAD/BAKERY"], item_class=[2712], perishable=[1])
     sales = _sales_raw(dates=[date(2024, 1, 1)], store_nbr=[1], item_nbr=[1], unit_sales=[1.0])
-    result = load_items(items, sales, fractional_threshold=0.5, default_pack_multiple=1.0)
-    validate_table(result, Item, table_name="items", primary_key=ITEMS_PRIMARY_KEY)
+    result = load_items(
+        items, sales, fractional_threshold=0.5, default_pack_multiple=1.0, **_economics_kwargs()
+    )
+    validate_table(
+        result,
+        Item,
+        table_name="items",
+        primary_key=ITEMS_PRIMARY_KEY,
+        required_non_null=frozenset({"cost", "price_ref"}),
+    )
     row = result.to_dicts()[0]
 
     assert row["ean"] is None
     assert row["description"] is None
-    assert row["cost"] is None
-    assert row["price_ref"] is None
     assert row["is_anchor"] is None
     assert row["category"] == "BREAD/BAKERY"
     assert row["item_class"] == "2712"
     assert row["is_perishable"] is True
     assert row["supplier_id"] == "SUP-BREAD_BAKERY"
+
+    # cost/price_ref: derivados, não nulos, com origem declarada na própria linha
+    assert row["price_ref"] == 10.0
+    assert row["cost"] == pytest.approx(10.0 * (1 - 0.32))  # BREAD/BAKERY: margem 0.32
+    assert row["economics_origin"] is not None
+    assert "arbitrado" in row["economics_origin"]
+
+
+def test_items_cost_e_price_ref_batem_com_build_item_economics() -> None:
+    """Requisito da aprovação da Sprint 16.5, Etapa 3.2: `cost`/`price_ref`
+    do canônico têm que bater EXATO com o que
+    `motor.metrics.financial.build_item_economics` calcula em tempo de
+    análise -- mesma fórmula, duas camadas. Divergência entre elas no
+    futuro tem que quebrar este teste, não passar em silêncio."""
+    items = _items_raw(
+        item_nbr=[1, 2, 3],
+        family=["GROCERY I", "MEATS", "PLAYERS AND ELECTRONICS"],  # a 3a categoria cai no default
+        item_class=[1, 1, 1],
+        perishable=[0, 0, 0],
+    )
+    sales = _sales_raw(
+        dates=[date(2024, 1, 1)] * 3, store_nbr=[1, 1, 1], item_nbr=[1, 2, 3], unit_sales=[1.0] * 3
+    )
+    kwargs = _economics_kwargs(
+        uniform_unit_price=7.5,
+        category_margin_pct={"GROCERY I": 0.18, "MEATS": 0.14},
+        default_margin_pct=0.25,
+    )
+    canonical = load_items(
+        items, sales, fractional_threshold=0.5, default_pack_multiple=1.0, **kwargs
+    )
+
+    analise = build_item_economics(
+        canonical.select("item_id", "category"),
+        category_margin_pct=kwargs["category_margin_pct"],  # type: ignore[arg-type]
+        default_margin_pct=kwargs["default_margin_pct"],  # type: ignore[arg-type]
+        uniform_unit_price=kwargs["uniform_unit_price"],  # type: ignore[arg-type]
+    ).sort("item_id")
+
+    assert canonical.sort("item_id")["cost"].to_list() == analise["cost"].to_list()
+    assert canonical.sort("item_id")["price_ref"].to_list() == analise["price"].to_list()
 
 
 # --------------------------------------------------------------------------
@@ -853,7 +923,7 @@ def test_build_canonical_favorita_manifest_tem_campos_esperados(tmp_path: Path) 
     manifest = build_canonical_favorita(parquet_dir, out_dir, params, overwrite=True)
 
     assert isinstance(manifest, CanonicalManifest)
-    assert manifest.schema_version == 1
+    assert manifest.schema_version == 2  # v2, Sprint 16.5: items.cost/price_ref deixam de ser null
     assert manifest.window_start == date(2024, 1, 1)
     assert manifest.window_end == date(2024, 1, 5)
     assert manifest.execution_seconds >= 0.0

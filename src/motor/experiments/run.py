@@ -22,7 +22,9 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import subprocess
+import time
 from collections.abc import Sequence
 from dataclasses import asdict, dataclass, replace
 from datetime import UTC, date, datetime, timedelta
@@ -32,6 +34,7 @@ from typing import Final
 import polars as pl
 from pydantic import BaseModel, ConfigDict
 
+from motor.assumptions import AssumptionsRegistry, build_assumptions_registry
 from motor.config import ExperimentArmParams, Params, load_params
 from motor.experiments.shared import build_simulator_for_pair
 from motor.features.calendar import StoreLocale, load_holidays, load_store_locale
@@ -41,6 +44,7 @@ from motor.forecast.quantile_gbm import (
     QuantileGbmForecaster,
     QuantileModelRegistry,
     compute_config_hash,
+    precompute_predictions,
     train_quantile_models,
 )
 from motor.forecast.statistical import StatisticalForecaster
@@ -60,7 +64,7 @@ from motor.policy.erp_baseline import ErpBaselinePolicy
 from motor.selection import SubsetSelectionResult, select_subset
 
 _REPO_ROOT: Final = Path(__file__).resolve().parents[3]
-_RUN_MANIFEST_SCHEMA_VERSION: Final = 1
+_RUN_MANIFEST_SCHEMA_VERSION: Final = 5  # v5 (Sprint 16.5): + simulation_window.polars_max_threads
 _METRICS_ROUND_NDIGITS: Final = 8
 
 # --------------------------------------------------------------------------
@@ -209,13 +213,17 @@ def _build_quantile_gbm_registry(
     store_id: str,
     item_ids: list[str],
     horizon_by_item: dict[str, int],
+    review_period_by_item: dict[str, int],
     calendar_locale: StoreLocale,
     holidays: pl.DataFrame,
     params: Params,
-) -> tuple[QuantileModelRegistry, pl.DataFrame]:
+) -> tuple[QuantileModelRegistry, pl.DataFrame, dict[str, dict[date, dict[float, float]]]]:
     """Treina o modelo GLOBAL do braço 3 UMA VEZ, fora do loop por item (ver
     docstring de `motor.forecast.quantile_gbm`) -- `run_arm` chama isto antes
     de montar qualquer `Simulator`, só quando `arm.forecaster == 'quantile_gbm'`.
+    Sprint 16: também PRÉ-COMPUTA, aqui, toda previsão que o braço vai pedir
+    (`precompute_predictions`, batching de `booster.predict()`) -- mesma
+    razão de o treino já acontecer fora do loop por item, mesmo lugar.
 
     Devolve também `sales_full_subset` (todas as colunas canônicas, inclusive
     `on_promo`) para o loop por item fatiar sem reler o parquet -- é a mesma
@@ -233,6 +241,7 @@ def _build_quantile_gbm_registry(
         quantiles=params.model.quantiles,
         store_id=store_id,
         item_ids=item_ids,
+        horizon_by_item=horizon_by_item,
     )
     registry = train_quantile_models(
         sales_full_subset,
@@ -251,7 +260,26 @@ def _build_quantile_gbm_registry(
         cache_dir=Path(params.quantile_gbm.model_cache_dir),
         config_hash=config_hash,
     )
-    return registry, sales_full_subset
+    # decision_dates == retrain_dates: mesmo período (model.retrain_cadence_days
+    # == review_period_days neste subconjunto) e mesma referência
+    # (simulation.start_date) -- ver docstring de precompute_predictions. Se essa
+    # igualdade um dia deixar de valer, predict_quantiles recusa alto e claro
+    # (as_of sem previsão pré-computada), nunca silencioso.
+    predictions = precompute_predictions(
+        sales_full_subset,
+        items,
+        store_id=store_id,
+        item_ids=item_ids,
+        horizon_by_item=horizon_by_item,
+        review_period_by_item=review_period_by_item,
+        decision_dates=retrain_dates,
+        quantiles=params.model.quantiles,
+        features_params=params.features,
+        calendar_locale=calendar_locale,
+        holidays=holidays,
+        registry=registry,
+    )
+    return registry, sales_full_subset, predictions
 
 
 def _find_arm(params: Params, arm_name: str) -> ExperimentArmParams:
@@ -387,22 +415,23 @@ def run_arm(
     }
 
     quantile_gbm_registry: QuantileModelRegistry | None = None
-    sales_full_subset: pl.DataFrame | None = None
-    calendar_locale: StoreLocale | None = None
-    holidays: pl.DataFrame | None = None
+    quantile_gbm_predictions: dict[str, dict[date, dict[float, float]]] | None = None
     if arm.forecaster == "quantile_gbm":
         raw_parquet_dir = Path(params.data.raw_parquet_dir)
         calendar_locale = load_store_locale(subset.store_id, raw_parquet_dir)
         holidays = load_holidays(raw_parquet_dir)
-        quantile_gbm_registry, sales_full_subset = _build_quantile_gbm_registry(
-            sales=sales,
-            items=items,
-            store_id=subset.store_id,
-            item_ids=item_ids,
-            horizon_by_item=horizon_by_item,
-            calendar_locale=calendar_locale,
-            holidays=holidays,
-            params=params,
+        quantile_gbm_registry, _sales_full_subset, quantile_gbm_predictions = (
+            _build_quantile_gbm_registry(
+                sales=sales,
+                items=items,
+                store_id=subset.store_id,
+                item_ids=item_ids,
+                horizon_by_item=horizon_by_item,
+                review_period_by_item=review_period_by_item,
+                calendar_locale=calendar_locale,
+                holidays=holidays,
+                params=params,
+            )
         )
 
     event_frames: list[pl.DataFrame] = []
@@ -413,20 +442,11 @@ def run_arm(
         horizon_days = horizon_by_item[item_id]
 
         if arm.forecaster == "quantile_gbm":
-            assert quantile_gbm_registry is not None
-            assert sales_full_subset is not None
-            assert calendar_locale is not None
-            assert holidays is not None
+            assert quantile_gbm_predictions is not None
             forecaster: Forecaster = QuantileGbmForecaster(
-                store_id=subset.store_id,
                 item_id=item_id,
-                item_sales=sales_full_subset.filter(pl.col("item_id") == item_id),
-                items_catalog=items,
                 expected_horizon=horizon_days,
-                registry=quantile_gbm_registry,
-                calendar_locale=calendar_locale,
-                holidays=holidays,
-                features_params=params.features,
+                precomputed=quantile_gbm_predictions[item_id],
             )
         else:
             forecaster = _build_forecaster(arm.forecaster, params)
@@ -564,6 +584,24 @@ _PARAMS_HASH_SCOPE_NOTE = (
     "propósito -- não comparar um contra o outro."
 )
 
+_QUANTILE_GRID_COUPLING_NOTE = (
+    "Achado na revisão da Sprint 16, ao estender model.quantiles de "
+    "[0.5, 0.8, 0.9, 0.95] para [0.5, 0.70, 0.80, 0.85, 0.90, 0.95]: "
+    "NonCrossingCorrection.apply (motor.forecast.quantile_gbm) ordena os "
+    "valores brutos de TODOS os quantis de active_quantiles e reatribui por "
+    "RANK, não por identidade de quantil -- cada booster treina "
+    "independente (pinball loss no seu próprio quantil, imune ao tamanho da "
+    "grade), mas o valor que a política lê para, por exemplo, quantile=0.90 "
+    "muda dependendo de quantos e quais OUTROS quantis estão na mesma grade, "
+    "porque a correção mistura todos antes de reatribuir. Medido: braço 3 em "
+    "lead_time=3, alpha=0.90 deu decision_metric=11.71267776 sob a grade "
+    "antiga (4 quantis, Sprint 15) e 11.56804972 sob a grade nova (6 "
+    "quantis) -- mesmo config, mesmos dados, só a grade mudou. CONSEQUÊNCIA: "
+    "resultados do braço 3 (`forecaster=quantile_gbm`) só são comparáveis "
+    "entre execuções com o MESMO active_quantiles abaixo. Nunca compare um "
+    "decision_metric de braço 3 contra outro sem checar que a grade bate."
+)
+
 
 class SimulationWindowManifest(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -573,6 +611,23 @@ class SimulationWindowManifest(BaseModel):
     evaluation_start: date
     end: date
     n_evaluation_days: int
+    seed: int
+    """`params.simulation.seed` (Sprint 16.5, Etapa 3.4/3.6) -- achado da
+    revisão: faltava no manifesto inteiramente, não só nesta varredura.
+    Autossuficiência (Sprint 9) inclui reproduzir a mesma execução daqui a
+    um mês -- sem o seed registrado, "determinístico" era uma alegação sem
+    como conferir a partir do próprio resultado."""
+    polars_max_threads: int | None = None
+    """`POLARS_MAX_THREADS` do processo que gerou este manifesto, lido de
+    `os.environ` no momento da gravação (Sprint 16.5, Etapa 3.9) -- `None`
+    quando a env var não estava setada (thread pool default do polars,
+    tipicamente todos os núcleos). Achado da checagem de determinismo desta
+    etapa: contagem de threads MEXE no último dígito de ponto flutuante dos
+    eventos brutos (ordem de redução do polars) -- não muda `item_metrics`
+    nem `decision_metric` (arredondados, ver `_round_float_columns`), mas é
+    uma premissa de execução que demonstravelmente afeta o float, e a
+    Sprint 9 pede que toda premissa ativa esteja no resumo, não só as que
+    mudam o resultado que importa."""
 
 
 class FinancialAssumptionsManifest(BaseModel):
@@ -631,6 +686,7 @@ class QuantileGbmDiagnosticsManifest(BaseModel):
 
     crossing_methodology_note: str
     zero_target_share_limitation: str
+    grid_coupling_note: str
     n_retrain_dates: int
     n_correction_calls: int
     n_correction_activations: int
@@ -666,6 +722,21 @@ class RunManifest(BaseModel):
     `generated_at`/`execution_seconds` são os únicos campos que variam entre
     duas execuções com o mesmo código/parâmetros/entrada -- mesma exceção
     documentada em `CanonicalManifest`, não uma regra nova.
+
+    `execution_seconds` (Sprint 16, achado da revisão): `time.perf_counter()`,
+    NÃO relógio de parede -- no Linux, `CLOCK_MONOTONIC` não conta tempo em
+    que a máquina ficou suspensa, e `datetime.now()` conta (um run já
+    registrou 34276s de relógio de parede para 2092s de computação real,
+    porque a máquina dormiu no meio). `generated_at` continua timestamp de
+    relógio de parede -- é o uso certo dele, não duração.
+
+    `execution_seconds_clock_source` declara a fonte explícita -- "perf_counter"
+    a partir desta versão do schema; um manifesto pré-existente (schema_version
+    1, sem este campo -- ex.: a execução da Sprint 15, 2229.7s, e o que restou
+    dela no snapshot `results/_archive/`) tem `execution_seconds` em relógio de
+    parede e NÃO é comparável a um `execution_seconds` desta versão em diante.
+    Duração sem fonte declarada é exatamente o tipo de número que engana
+    silenciosamente três semanas depois -- não repetir isso.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -673,6 +744,7 @@ class RunManifest(BaseModel):
     schema_version: int
     generated_at: datetime
     execution_seconds: float
+    execution_seconds_clock_source: str = "perf_counter"
     git_commit_hash: str | None
     params_hash: str
     params_hash_scope: str
@@ -683,6 +755,12 @@ class RunManifest(BaseModel):
     store_id: str
     n_items: int
     item_ids: list[str]
+    active_quantiles: list[float]
+    """`params.model.quantiles` desta execução -- registrado explícito (Sprint
+    16) porque o braço 3 (quantile_gbm) NÃO é comparável entre execuções com
+    grades diferentes (ver `QuantileGbmDiagnosticsManifest.grid_coupling_note`);
+    presente em todo manifesto, não só quando `forecaster == 'quantile_gbm'`,
+    mesmo padrão de `basestock_calibration`."""
 
     simulation_window: SimulationWindowManifest
     shared_assumptions: dict[str, str]
@@ -690,6 +768,12 @@ class RunManifest(BaseModel):
     basestock_calibration: BasestockCalibrationManifest
     quantile_gbm_diagnostics: QuantileGbmDiagnosticsManifest | None = None
     financial_assumptions: FinancialAssumptionsManifest
+    assumptions: AssumptionsRegistry
+    """Registro auditável de premissas arbitradas (Sprint 16.5, Etapa 3.1,
+    `motor.assumptions`) -- CAMPO OBRIGATÓRIO, sem default: um manifesto
+    construído sem isto não valida, pydantic recusa a gravação com erro
+    explícito nomeando o campo. Nunca um resultado publicado sem declarar
+    o que, nele, é medido e o que é chute."""
     limitations: list[str]
     results: ResultsManifest
 
@@ -759,12 +843,19 @@ def _build_manifest(
         store_id=result.store_id,
         n_items=len(result.item_ids),
         item_ids=list(result.item_ids),
+        active_quantiles=list(params.model.quantiles),
         simulation_window=SimulationWindowManifest(
             start=params.simulation.start_date,
             warmup_days=params.simulation.warmup_days,
             evaluation_start=evaluation_start,
             end=params.simulation.end_date,
             n_evaluation_days=n_evaluation_days,
+            seed=params.simulation.seed,
+            polars_max_threads=(
+                int(os.environ["POLARS_MAX_THREADS"])
+                if "POLARS_MAX_THREADS" in os.environ
+                else None
+            ),
         ),
         shared_assumptions={
             "lead_time_review_period": (
@@ -809,6 +900,7 @@ def _build_manifest(
             QuantileGbmDiagnosticsManifest(
                 crossing_methodology_note=_QUANTILE_CROSSING_METHODOLOGY_NOTE,
                 zero_target_share_limitation=_ZERO_TARGET_SHARE_LIMITATION,
+                grid_coupling_note=_QUANTILE_GRID_COUPLING_NOTE,
                 n_retrain_dates=len(_quantile_gbm_retrain_dates(params)),
                 n_correction_calls=result.quantile_gbm_registry.correction.n_calls,
                 n_correction_activations=result.quantile_gbm_registry.correction.n_corrected,
@@ -831,6 +923,7 @@ def _build_manifest(
             price_invariance_note=PRICE_INVARIANCE_NOTE,
             scale_warning=SCALE_WARNING,
         ),
+        assumptions=build_assumptions_registry(params),
         limitations=list(LIMITATIONS),
         results=ResultsManifest(
             portfolio=PortfolioResultsManifest(**asdict(result.portfolio_metrics)),
@@ -849,6 +942,93 @@ def _build_manifest(
 
 
 # --------------------------------------------------------------------------
+# Execução + gravação (Sprint 16: corpo de `main()` extraído para ser
+# compartilhado com `motor.experiments.sensitivity`, que roda o MESMO braço
+# repetidas vezes com `lead_time`/`alpha` variados -- sem duplicar o
+# caminho que decide o que vira arquivo em disco.)
+# --------------------------------------------------------------------------
+
+
+class ExistingResultError(RuntimeError):
+    """`results_dir/<arm>/manifest.json` já existe -- `results/` não é
+    versionado (`.gitignore`), então sobrescrever em silêncio destrói o único
+    registro de um resultado já publicado sem deixar rastro (aconteceu de
+    verdade na revisão da Sprint 16: um manifesto da Sprint 15 foi perdido
+    assim, ver `results/_archive/`). A correção é arquivar o resultado atual
+    antes de rodar de novo, ou passar `force=True`/`--force` quando
+    sobrescrever é mesmo a intenção."""
+
+
+def run_arm_and_save(
+    arm_name: str,
+    params: Params,
+    *,
+    sales: pl.LazyFrame,
+    items: pl.DataFrame,
+    suppliers: pl.DataFrame,
+    stock: pl.DataFrame,
+    subset_cache_path: Path,
+    canonical_dir: Path,
+    results_dir: Path,
+    force: bool = False,
+) -> RunManifest:
+    """Roda `run_arm` e grava os três artefatos de sempre
+    (`events.parquet`, `item_metrics.parquet`, `manifest.json`) em
+    `results_dir/<arm_name>/`. Único caminho que escreve um braço em disco --
+    `main()` (CLI) e `motor.experiments.sensitivity` chamam isto, nenhum dos
+    dois duplica a lógica de gravação.
+    """
+    arm_dir = results_dir / arm_name
+    manifest_path = arm_dir / "manifest.json"
+    if manifest_path.exists() and not force:
+        msg = (
+            f"{manifest_path} já existe. Rodar de novo sem --force/force=True "
+            "sobrescreveria um resultado publicado sem registro -- ver "
+            "ExistingResultError."
+        )
+        raise ExistingResultError(msg)
+
+    # perf_counter, não datetime.now() -- CLOCK_MONOTONIC no Linux não conta
+    # tempo em que a máquina ficou suspensa (achado real desta sprint:
+    # execution_seconds em relógio de parede chegou a registrar 34276s para
+    # uma execução que só computou 2092s de verdade). Todo tempo que entra
+    # em manifesto ou em projeção de custo usa perf_counter -- nunca
+    # datetime.now() para DURAÇÃO (para TIMESTAMP, `generated_at` abaixo em
+    # `_build_manifest` continua datetime.now(UTC), que é o uso certo dele).
+    t0 = time.perf_counter()
+    result = run_arm(
+        arm_name,
+        params,
+        sales=sales,
+        items=items,
+        suppliers=suppliers,
+        stock=stock,
+        subset_cache_path=subset_cache_path,
+    )
+    execution_seconds = time.perf_counter() - t0
+
+    arm_dir.mkdir(parents=True, exist_ok=True)
+    events_path = arm_dir / "events.parquet"
+    item_metrics_path = arm_dir / "item_metrics.parquet"
+    result.events.write_parquet(events_path)
+    result.item_metrics.write_parquet(item_metrics_path)
+
+    manifest = _build_manifest(
+        arm_name,
+        params,
+        result,
+        canonical_dir=canonical_dir,
+        events_path=events_path,
+        item_metrics_path=item_metrics_path,
+        execution_seconds=execution_seconds,
+    )
+    manifest_path.write_text(
+        json.dumps(manifest.model_dump(mode="json"), indent=2, sort_keys=True, ensure_ascii=False)
+    )
+    return manifest
+
+
+# --------------------------------------------------------------------------
 # CLI
 # --------------------------------------------------------------------------
 
@@ -860,6 +1040,14 @@ def main(argv: Sequence[str] | None = None) -> None:
     )
     parser.add_argument("--params", type=Path, default=Path("config/params.yaml"))
     parser.add_argument("--results-dir", type=Path, default=Path("results"))
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help=(
+            "sobrescreve --results-dir/--arm/manifest.json se já existir "
+            "(ver ExistingResultError)"
+        ),
+    )
     args = parser.parse_args(argv)
 
     params = load_params(args.params)
@@ -871,8 +1059,7 @@ def main(argv: Sequence[str] | None = None) -> None:
 
     subset_cache_path = args.results_dir / "subset_selection.json"
 
-    t0 = datetime.now(UTC)
-    result = run_arm(
+    manifest = run_arm_and_save(
         args.arm,
         params,
         sales=sales,
@@ -880,32 +1067,15 @@ def main(argv: Sequence[str] | None = None) -> None:
         suppliers=suppliers,
         stock=stock,
         subset_cache_path=subset_cache_path,
-    )
-    execution_seconds = (datetime.now(UTC) - t0).total_seconds()
-
-    arm_dir = args.results_dir / args.arm
-    arm_dir.mkdir(parents=True, exist_ok=True)
-    events_path = arm_dir / "events.parquet"
-    item_metrics_path = arm_dir / "item_metrics.parquet"
-    result.events.write_parquet(events_path)
-    result.item_metrics.write_parquet(item_metrics_path)
-
-    manifest = _build_manifest(
-        args.arm,
-        params,
-        result,
         canonical_dir=canonical_dir,
-        events_path=events_path,
-        item_metrics_path=item_metrics_path,
-        execution_seconds=execution_seconds,
-    )
-    (arm_dir / "manifest.json").write_text(
-        json.dumps(manifest.model_dump(mode="json"), indent=2, sort_keys=True, ensure_ascii=False)
+        results_dir=args.results_dir,
+        force=args.force,
     )
 
     print(
-        f"{args.arm}: {len(result.item_ids)} itens, loja {result.store_id} -> {arm_dir} "
-        f"(decision_metric={result.portfolio_metrics.decision_metric})"
+        f"{args.arm}: {manifest.n_items} itens, loja {manifest.store_id} -> "
+        f"{args.results_dir / args.arm} "
+        f"(decision_metric={manifest.results.portfolio.decision_metric})"
     )
 
 

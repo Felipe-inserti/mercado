@@ -25,7 +25,11 @@ from motor.features.build import build_features, build_training_matrix
 from motor.features.calendar import StoreLocale, build_calendar_features
 from motor.forecast.quantile_gbm import (
     InsufficientTrainingHistoryError,
+    QuantileGbmForecaster,
+    QuantileModelRegistry,
     build_categorical_encoding,
+    compute_config_hash,
+    precompute_predictions,
     target_for_origin,
     train_quantile_models,
 )
@@ -516,6 +520,44 @@ def test_cache_mesmo_estado_com_cache_quente(
     assert registry_c is not registry_a
 
 
+def test_compute_config_hash_muda_com_horizonte(tmp_path: Path) -> None:
+    """Achado na revisão da Sprint 16: `horizon_by_item` (= lead_time +
+    review_period, por item) entra no ALVO de treino e na feature
+    `RISK_WINDOW_FEATURE` dentro de `train_quantile_models`, mas não estava
+    na chave de cache -- dois treinos com `lead_time` diferente (portanto
+    horizonte diferente) e tudo mais igual colidiam no mesmo diretório de
+    cache. Este teste prova a correção nos dois sentidos: horizonte
+    diferente muda o hash; horizonte igual (mesmo com dicionários construídos
+    separadamente) produz o mesmo hash.
+    """
+    item_ids = ["i0", "i1"]
+    common_kwargs = {
+        "hyperparams": _hyperparams(tmp_path / "cache"),
+        "features_params": _features_params(),
+        "quantiles": [0.5, 0.9],
+        "store_id": _STORE,
+        "item_ids": item_ids,
+    }
+
+    hash_horizonte_10 = compute_config_hash(
+        horizon_by_item={"i0": 10, "i1": 10}, **common_kwargs
+    )
+    hash_horizonte_17 = compute_config_hash(
+        horizon_by_item={"i0": 17, "i1": 17}, **common_kwargs
+    )
+    hash_horizonte_10_de_novo = compute_config_hash(
+        horizon_by_item={"i1": 10, "i0": 10}, **common_kwargs  # ordem de inserção trocada
+    )
+    hash_horizonte_misto = compute_config_hash(
+        horizon_by_item={"i0": 10, "i1": 17}, **common_kwargs
+    )
+
+    assert hash_horizonte_10 != hash_horizonte_17  # horizonte uniforme diferente -> hash diferente
+    assert hash_horizonte_10 == hash_horizonte_10_de_novo  # mesmo horizonte, ordem irrelevante
+    # hash por item, não só pelo máximo do painel
+    assert hash_horizonte_misto not in {hash_horizonte_10, hash_horizonte_17}
+
+
 # --------------------------------------------------------------------------
 # 4) vazamento no caminho completo até o fit (Sprint 14 -> train_quantile_models)
 # --------------------------------------------------------------------------
@@ -602,3 +644,201 @@ def test_piso_minimo_de_origens_levanta_erro_claro(tmp_path: Path) -> None:
             cache_dir=tmp_path / "cache",
             config_hash="piso",
         )
+
+
+# --------------------------------------------------------------------------
+# 5) previsão em lote (Sprint 16: batching de booster.predict())
+# --------------------------------------------------------------------------
+
+
+def _predicao_item_a_item(
+    *,
+    registry: QuantileModelRegistry,
+    item_sales: pl.DataFrame,
+    items: pl.DataFrame,
+    store_id: str,
+    item_id: str,
+    as_of: date,
+    horizon: int,
+    quantiles: list[float],
+    features_params: FeaturesParams,
+    calendar_locale: StoreLocale,
+    holidays: pl.DataFrame,
+) -> dict[float, float]:
+    """Réplica FIEL do caminho de `predict_quantiles` de ANTES da Sprint 16
+    -- uma linha por vez, sem lote. Existe só para provar equivalência exata
+    contra `precompute_predictions` (o caminho de produção agora); não é
+    código de produção, não reflete nenhuma otimização."""
+    booster_set = registry.for_as_of(as_of)
+    calendar = build_calendar_features(
+        [as_of], locale=calendar_locale, holidays=holidays, params=features_params.calendar
+    )
+    row = build_features(
+        item_sales,
+        items,
+        as_of,
+        store_id=store_id,
+        calendar=calendar,
+        params=features_params,
+        item_ids=[item_id],
+    ).with_columns(pl.lit(horizon).alias(qgbm_module.RISK_WINDOW_FEATURE))
+    feature_cols = list(booster_set.feature_cols)
+    encoded = registry.categorical_encoding.encode(row.select(*feature_cols))
+    x = encoded.to_numpy()
+    raw = {q: float(booster_set.boosters[q].predict(x)[0]) for q in quantiles}
+    corrected = registry.correction.apply(raw)
+    return {q: max(0.0, corrected[q]) for q in quantiles}
+
+
+def test_precompute_predictions_bate_exato_com_calculo_item_a_item(tmp_path: Path) -> None:
+    """Requisito explícito da aprovação condicional do batching (Sprint 16):
+    loop vs. lote tem que bater BIT A BIT (`==` em float, não `pytest.approx`
+    nem `allclose`) -- LightGBM não reduz nada entre linhas na predição (só
+    no treino, ver docstring de `precompute_predictions`), então empilhar
+    itens antes de `booster.predict()` não pode mudar nenhum valor
+    individual. Compara a função de PRODUÇÃO (`precompute_predictions`,
+    usada por `run_arm`) contra uma réplica independente do cálculo linha a
+    linha (`_predicao_item_a_item`, acima) -- inclusive depois da
+    `NonCrossingCorrection`, não só o valor bruto do booster."""
+    item_ids = [f"i{k}" for k in range(5)]
+    start = date(2021, 1, 4)
+    sales = _synthetic_sales(item_ids, start=start, n_days=120, seed=7)
+    items = _items(item_ids)
+    horizon_by_item = dict.fromkeys(item_ids, 1)
+    review_period_by_item = dict.fromkeys(item_ids, 7)
+    features_params = _features_params()
+    quantiles = [0.5, 0.8, 0.9]
+    hyperparams = _hyperparams(tmp_path / "cache", num_boost_round=30)
+    as_of = start + timedelta(days=100)
+
+    registry = train_quantile_models(
+        sales,
+        items,
+        horizon_by_item,
+        store_id=_STORE,
+        item_ids=item_ids,
+        retrain_dates=[as_of],
+        earliest_training_origin=start + timedelta(days=7),
+        origin_cadence_days=7,
+        quantiles=quantiles,
+        features_params=features_params,
+        calendar_locale=_LOCALE,
+        holidays=_HOLIDAYS,
+        hyperparams=hyperparams,
+        cache_dir=tmp_path / "cache",
+        config_hash="teste-batching",
+    )
+
+    em_lote = precompute_predictions(
+        sales,
+        items,
+        store_id=_STORE,
+        item_ids=item_ids,
+        horizon_by_item=horizon_by_item,
+        review_period_by_item=review_period_by_item,
+        decision_dates=[as_of],
+        quantiles=quantiles,
+        features_params=features_params,
+        calendar_locale=_LOCALE,
+        holidays=_HOLIDAYS,
+        registry=registry,
+    )
+
+    assert set(em_lote) == set(item_ids)
+    for item_id in item_ids:
+        item_sales = sales.filter(pl.col("item_id") == item_id)
+        item_a_item = _predicao_item_a_item(
+            registry=registry,
+            item_sales=item_sales,
+            items=items,
+            store_id=_STORE,
+            item_id=item_id,
+            as_of=as_of,
+            horizon=horizon_by_item[item_id],
+            quantiles=quantiles,
+            features_params=features_params,
+            calendar_locale=_LOCALE,
+            holidays=_HOLIDAYS,
+        )
+        obtido = em_lote[item_id][as_of]
+        for q in quantiles:
+            assert obtido[q] == item_a_item[q], (
+                f"item={item_id} quantile={q}: lote={obtido[q]!r} != item_a_item={item_a_item[q]!r}"
+            )
+
+
+def test_precompute_predictions_review_period_nao_uniforme_levanta_erro_claro(
+    tmp_path: Path,
+) -> None:
+    """Achado da revisão da Sprint 16: `precompute_predictions` assume UMA
+    grade de `decision_dates` compartilhada por todos os itens -- se
+    `review_period_by_item` não for uniforme, isso é falso, e o erro tem que
+    ser explícito na hora do precompute, nunca um `as_of` faltando
+    silenciosamente na hora da decisão."""
+    item_ids = ["i0", "i1"]
+    start = date(2021, 1, 4)
+    sales = _synthetic_sales(item_ids, start=start, n_days=60, seed=1)
+    items = _items(item_ids)
+    horizon_by_item = dict.fromkeys(item_ids, 1)
+    features_params = _features_params()
+    hyperparams = _hyperparams(tmp_path / "cache", num_boost_round=10)
+    as_of = start + timedelta(days=50)
+
+    registry = train_quantile_models(
+        sales,
+        items,
+        horizon_by_item,
+        store_id=_STORE,
+        item_ids=item_ids,
+        retrain_dates=[as_of],
+        earliest_training_origin=start + timedelta(days=7),
+        origin_cadence_days=7,
+        quantiles=[0.5],
+        features_params=features_params,
+        calendar_locale=_LOCALE,
+        holidays=_HOLIDAYS,
+        hyperparams=hyperparams,
+        cache_dir=tmp_path / "cache",
+        config_hash="teste-review-nao-uniforme",
+    )
+
+    with pytest.raises(ValueError, match="review_period_by_item não é uniforme"):
+        precompute_predictions(
+            sales,
+            items,
+            store_id=_STORE,
+            item_ids=item_ids,
+            horizon_by_item=horizon_by_item,
+            review_period_by_item={"i0": 7, "i1": 14},  # não uniforme, de propósito
+            decision_dates=[as_of],
+            quantiles=[0.5],
+            features_params=features_params,
+            calendar_locale=_LOCALE,
+            holidays=_HOLIDAYS,
+            registry=registry,
+        )
+
+
+def test_quantile_gbm_forecaster_so_consulta_o_precomputado_nunca_calcula() -> None:
+    """`QuantileGbmForecaster` (Sprint 16) não guarda mais `item_sales`,
+    `registry`, `calendar_locale` nem nada que permita calcular algo na hora
+    -- só um dicionário já pronto. `predict_quantiles` fora do `as_of`
+    pré-computado tem que recusar alto e claro, nunca recalcular por baixo
+    dos panos."""
+    as_of = date(2021, 1, 1)
+    quantiles = [0.5, 0.9]
+    precomputed = {as_of: {0.5: 10.0, 0.9: 20.0}}
+    fc = QuantileGbmForecaster(item_id="i0", expected_horizon=7, precomputed=precomputed)
+    historico_vazio = pl.DataFrame(
+        {"date": [], "units_sold": []}, schema={"date": pl.Date, "units_sold": pl.Float64}
+    )
+    fc.fit(historico_vazio, as_of)
+
+    resultado = fc.predict_quantiles(as_of, 7, quantiles)
+    assert resultado["value"].to_list() == [10.0, 20.0]
+
+    outro_as_of = as_of + timedelta(days=7)  # fora de `precomputed`, de propósito
+    # satisfaz a guarda de fit()/as_of -- o que falta é o lookup em precomputed
+    fc.fit(historico_vazio, outro_as_of)
+    with pytest.raises(ValueError, match="nenhuma previsão pré-computada"):
+        fc.predict_quantiles(outro_as_of, 7, quantiles)

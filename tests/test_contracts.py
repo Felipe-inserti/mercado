@@ -63,6 +63,7 @@ def valid_items() -> pl.DataFrame:
             "is_anchor": [True, False],
             "cost": [None, None],
             "price_ref": [None, None],
+            "economics_origin": ["arbitrado: teste", "arbitrado: teste"],
         }
     )
 
