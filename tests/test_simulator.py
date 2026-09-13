@@ -36,6 +36,23 @@ def test_in_transit_e_posicao_menos_em_maos() -> None:
     assert _in_transit(estado) == 8.0
 
 
+def test_position_bate_com_on_hand_end_e_in_transit_end_do_ultimo_evento() -> None:
+    # Sprint 17 (gerador de lista de compra): position() precisa refletir
+    # exatamente o estado do simulador depois de um run PARCIAL -- é assim
+    # que o gerador chega numa posição real (não inventada) numa data de
+    # decisão qualquer, sem rodar o período inteiro.
+    scenario = build_analytic_scenario(
+        daily_demand=10.0, lead_time_days=3, review_period_days=7, total_days=20
+    )
+    parcial = scenario.start + timedelta(days=9)  # para no meio de um ciclo
+    eventos = scenario.simulator.run(scenario.start, parcial)
+
+    on_hand, in_transit = scenario.simulator.position()
+
+    assert on_hand == eventos[-1].on_hand_end
+    assert in_transit == eventos[-1].in_transit_end
+
+
 # -- calendário de revisão ---------------------------------------------------
 
 

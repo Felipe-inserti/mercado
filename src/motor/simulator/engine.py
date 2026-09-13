@@ -132,6 +132,16 @@ class Simulator:
         self._is_review_day = is_review_day
         self._shelf_life_from_arrival_days = shelf_life_from_arrival_days
 
+    def position(self) -> tuple[float, float]:
+        """`(em_mãos, em_trânsito)` no estado atual -- leitura pública,
+        sem expor `InventoryState` inteiro. Existe para o gerador de lista
+        de compra (Sprint 17): roda o loop parcialmente até a véspera de uma
+        data de decisão qualquer (`run(start, as_of - 1 dia)`), lê a posição
+        real resultante com este método, e monta o `DecisionContext` daquela
+        data por fora -- sem duplicar `InventoryState` nem reabrir acesso a
+        `self._state` de fora do módulo."""
+        return self._state.em_maos(), _in_transit(self._state)
+
     def run(self, start: date, end: date) -> list[DailyEvent]:
         """Roda o loop de `start` a `end` (inclusive), um evento por dia.
 

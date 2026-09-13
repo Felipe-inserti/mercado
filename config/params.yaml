@@ -189,6 +189,99 @@ supplier_order_policy:
   # atingir o mínimo adia o pedido inteiro (MINIMO_INATINGIVEL).
   max_additional_packs_for_minimum: 10 # arbitrado: piso plausível antes de considerar o mínimo inatingível
 
+# Sprint 17, Etapa 3.15 -- SÓ para motor.reporting.purchase_list. NÃO usado
+# por motor.io.loaders nem por nenhum resultado de experiments/iso_service
+# (canônico e todo o resto do projeto continuam com pack_multiple=1,0 e
+# min_order=0,0, arbitrados como default mais simples -- ver EconomicsParams
+# e a nota em motor.assumptions). O canônico Favorita não tem fardo nem
+# pedido mínimo reais; com os dois zerados, apply_supplier_constraints nunca
+# tinha chance de disparar suas próprias regras, o que esvaziava a lista de
+# compra como peça de venda. Origem real destas regras (documento de
+# negócio): entrevista de onboarding com o fornecedor, não o ERP.
+purchase_list_supplier_assumptions:
+  # Fardo por família (arbitrado, prática de varejo brasileiro, sem medição):
+  pack_multiple_by_category:
+    # perecível fresco vendido a peça/peso -- sem fardo real
+    PRODUCE: 1.0
+    MEATS: 1.0
+    POULTRY: 1.0
+    SEAFOOD: 1.0
+    DELI: 1.0
+    # giro rápido, fardo pequeno
+    "BREAD/BAKERY": 6.0
+    DAIRY: 6.0
+    EGGS: 6.0
+    "FROZEN FOODS": 6.0
+    "PREPARED FOODS": 6.0
+    # mercearia seca / limpeza / higiene, fardo padrão
+    "GROCERY I": 12.0
+    "GROCERY II": 12.0
+    CLEANING: 12.0
+    "PERSONAL CARE": 12.0
+    "HOME CARE": 12.0
+    "BABY CARE": 12.0
+    # bebidas, logística de pallet fechado
+    BEVERAGES: 24.0
+    "LIQUOR,WINE,BEER": 24.0
+    # bazar / não-alimentar, fardo pequeno (as 15 categorias restantes)
+    "HOME AND KITCHEN I": 6.0
+    "HOME AND KITCHEN II": 6.0
+    CELEBRATION: 6.0
+    "LAWN AND GARDEN": 6.0
+    LADIESWEAR: 6.0
+    LINGERIE: 6.0
+    AUTOMOTIVE: 6.0
+    BEAUTY: 6.0
+    "PLAYERS AND ELECTRONICS": 6.0
+    "SCHOOL AND OFFICE SUPPLIES": 6.0
+    "PET SUPPLIES": 6.0
+    MAGAZINES: 6.0
+    HARDWARE: 6.0
+    BOOKS: 6.0
+    "HOME APPLIANCES": 6.0
+  # R$ 2.000,00 para categoria com MENOS DE 50 itens no canônico completo
+  # (proxy de fornecedor pequeno/especializado -- entrega dedicada não se
+  # paga sozinha em volume baixo); R$ 0,00 para as demais (alto volume,
+  # entrega já frequente e justificada por si). Critério calculado uma vez
+  # sobre o canônico (ver docstring de PurchaseListSupplierAssumptionsParams);
+  # valores congelados aqui, não recalculados em runtime.
+  min_order_value_by_category:
+    # >= 50 itens no canônico -- sem mínimo
+    "GROCERY I": 0.0
+    BEVERAGES: 0.0
+    CLEANING: 0.0
+    PRODUCE: 0.0
+    DAIRY: 0.0
+    "PERSONAL CARE": 0.0
+    "BREAD/BAKERY": 0.0
+    "HOME CARE": 0.0
+    DELI: 0.0
+    MEATS: 0.0
+    "HOME AND KITCHEN I": 0.0
+    "LIQUOR,WINE,BEER": 0.0
+    "FROZEN FOODS": 0.0
+    POULTRY: 0.0
+    # < 50 itens no canônico -- pedido mínimo de R$ 2.000,00
+    "HOME AND KITCHEN II": 2000.0
+    EGGS: 2000.0
+    CELEBRATION: 2000.0
+    "PREPARED FOODS": 2000.0
+    "LAWN AND GARDEN": 2000.0
+    LADIESWEAR: 2000.0
+    LINGERIE: 2000.0
+    AUTOMOTIVE: 2000.0
+    BEAUTY: 2000.0
+    "PLAYERS AND ELECTRONICS": 2000.0
+    "SCHOOL AND OFFICE SUPPLIES": 2000.0
+    "GROCERY II": 2000.0
+    "PET SUPPLIES": 2000.0
+    SEAFOOD: 2000.0
+    MAGAZINES: 2000.0
+    HARDWARE: 2000.0
+    "BABY CARE": 2000.0
+    BOOKS: 2000.0
+    "HOME APPLIANCES": 2000.0
+
 economics:
   capital_cost_annual: 0.15 # arbitrado: custo de capital anualizado plausível para varejo pequeno/médio no Brasil
   # Sprint 8: preço único por unidade vendida, aplicado a TODO item -- o Favorita não
@@ -254,10 +347,100 @@ economics:
       # vizinho mais próximo na grade atual) é o valor menos arbitrário disponível
     limpeza: 0.90
 
+# Sprint 13, implementadas em motor.policy.guardrails na Etapa 3.16 (Sprint
+# 17) -- até aqui, este bloco nunca tinha sido lido por nenhuma função (ver
+# CLAUDE.md, emenda Sprint 17). Decisões de negócio abaixo, não estimadas.
+#
+# Emenda (Etapa 3.16.2): shelf_life_days_by_category é VALIDADE física, não
+# teto de cobertura direto -- o teto efetivo aplicado por
+# motor.policy.guardrails.apply_coverage_cap é
+# max(validade, lead_time_days + review_period_days). A validade sozinha
+# como teto (Etapa 3.16 original) cortava perecível fresco/giro rápido pra
+# baixo da própria janela de risco na célula de teste (lt=7/rp=14 -> 21
+# dias > validade de 7/14) -- ruptura estrutural garantida, não proteção.
+# Os valores abaixo continuam corretos COMO VALIDADE; o que estava errado
+# era usá-los sem o piso da janela de risco.
 guardrails:
-  max_coverage_days: 21.0 # arbitrado: teto de cobertura de ~3 semanas antes de soar alarme de excesso
-  max_order_variation_pct: 0.50 # arbitrado: pedido não pode variar mais que 50% sobre a média histórica de compra
-  weekly_budget: null # arbitrado: sem restrição de caixa ativa até termos o dado real do cliente
+  # Validade por família (dias) -- mesmo agrupamento de família de
+  # purchase_list_supplier_assumptions.pack_multiple_by_category, com as
+  # duas famílias "mercearia seca" e "bazar/não-alimentar" fundidas (mesma
+  # validade de 45 dias para as duas -- giro lento o bastante pra não
+  # precisar de validade separada).
+  shelf_life_days_by_category:
+    # perecível fresco -- estraga rápido, validade apertada
+    PRODUCE: 7.0
+    MEATS: 7.0
+    POULTRY: 7.0
+    SEAFOOD: 7.0
+    DELI: 7.0
+    # giro rápido
+    "BREAD/BAKERY": 14.0
+    DAIRY: 14.0
+    EGGS: 14.0
+    "FROZEN FOODS": 14.0
+    "PREPARED FOODS": 14.0
+    # bebidas
+    BEVERAGES: 30.0
+    "LIQUOR,WINE,BEER": 30.0
+    # mercearia seca e não-alimentar (giro lento, validade larga)
+    "GROCERY I": 45.0
+    "GROCERY II": 45.0
+    CLEANING: 45.0
+    "PERSONAL CARE": 45.0
+    "HOME CARE": 45.0
+    "BABY CARE": 45.0
+    "HOME AND KITCHEN I": 45.0
+    "HOME AND KITCHEN II": 45.0
+    CELEBRATION: 45.0
+    "LAWN AND GARDEN": 45.0
+    LADIESWEAR: 45.0
+    LINGERIE: 45.0
+    AUTOMOTIVE: 45.0
+    BEAUTY: 45.0
+    "PLAYERS AND ELECTRONICS": 45.0
+    "SCHOOL AND OFFICE SUPPLIES": 45.0
+    "PET SUPPLIES": 45.0
+    MAGAZINES: 45.0
+    HARDWARE: 45.0
+    BOOKS: 45.0
+    "HOME APPLIANCES": 45.0
+  # Limite de variação: sugestão acima de 2x a média das compras (não
+  # vendas) dos últimos 90 dias do item vai para revisão humana --
+  # SINALIZADA, não cortada. Item sem histórico de compra suficiente cai na
+  # regra de item novo, não nesta (ver motor.policy.guardrails).
+  variation_limit_multiple: 2.0
+  variation_lookback_days: 90
+  # Item novo: menos de 90 dias desde o primeiro registro de venda, OU
+  # menos de 30 dias COM venda no histórico -- quantidade fixa (mediana da
+  # categoria), nunca por modelo.
+  new_item_min_history_days: 90
+  new_item_min_days_with_sales: 30
+  # Orçamento semanal arbitrado -- Etapa 3.16.3: R$200.000 (valor original)
+  # foi calibrado contra um total contaminado pelo teto de cobertura
+  # quebrado (~R$497k, que já vinha errado); com o teto corrigido, a
+  # necessidade real da política nesta célula é ~R$462k/ciclo de 2 semanas
+  # (~R$231k/semana) -- um orçamento de R$200k/semana corta 13,5% do
+  # pedido TODA semana, o que não é restrição de caixa, é subfinanciamento
+  # crônico (apareceria como ruptura sistemática num cliente real, não
+  # como disciplina). Recalibrado para R$250.000/semana (R$500k/ciclo),
+  # pouco ACIMA da necessidade típica de R$462k -- critério: a regra deve
+  # disparar só em semana atípica (pico de demanda, problema de fluxo de
+  # caixa pontual), não toda semana. Fora do orçamento, corte por ordem de
+  # margem gerada por real investido (maior margem primeiro), do fim pra
+  # trás -- nunca proporcional; ver Etapa 3.16.3 sobre o risco de essa
+  # regra, sem piso por categoria, zerar categorias inteiras de baixa
+  # margem (achado registrado, correção NÃO implementada ainda).
+  weekly_budget_rs: 250000.0
+  # Piso de negócio (Etapa 3.16.4): nenhuma categoria cai abaixo desta
+  # fração do seu próprio valor originalmente sugerido, qualquer que seja
+  # a margem. Sem isso, o corte por margem sozinho zerava categorias
+  # inteiras de baixa margem (perecível fresco, mercearia) que são item
+  # ÂNCORA por desenho (margem baixa DE PROPÓSITO, pra trazer o cliente à
+  # loja) -- 8 de 16 fornecedores zerados/quase-zerados na medição da
+  # Etapa 3.16.3. Valor ARBITRADO, critério: preserva presença de gôndola
+  # em toda categoria, cortando fundo o suficiente (40%) para a regra
+  # ainda ter efeito real -- não é resultado de otimização.
+  cash_constraint_category_floor_fraction: 0.60
 
 features:
   # Sprint 14: motor.features.calendar / motor.features.build. Nenhum modelo

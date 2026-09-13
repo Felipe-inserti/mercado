@@ -187,6 +187,46 @@ class SupplierOrderPolicyParams(ParamsSection):
     max_additional_packs_for_minimum: PositiveInt
 
 
+class PurchaseListSupplierAssumptionsParams(ParamsSection):
+    """Premissas de fornecedor REALISTAS, só para `motor.reporting.
+    purchase_list` (Sprint 17, Etapa 3.15) -- NÃO usadas por `motor.io.
+    loaders`, `motor.experiments.run`/`sensitivity`/`iso_service`, nem por
+    nenhum resultado já medido (a comparação iso-serviço da Etapa 3.12 usa
+    `pack_multiple=1,0`/`min_order=0,0` uniformes, do canônico, e não foi
+    recalculada com isto).
+
+    O canônico Favorita não tem fardo nem pedido mínimo reais (Sprint 3, D7)
+    -- `Item.pack_multiple`/`Supplier.min_order_value` chegam nulos/zerados
+    do bruto e o resto do projeto os trata com o default arbitrado mais
+    simples (1,0 / 0,0), documentado como tal. Isso é honesto para medir a
+    política, mas esvazia a lista de compra como peça de venda: nenhuma
+    restrição de fornecedor tem chance de disparar. Este bloco arbitra
+    valores plausíveis, por família de categoria, do mesmo jeito que
+    `motor.assumptions`/`EconomicsParams` já arbitram margem e alpha -- a
+    origem real dessas regras (documento de negócio) é a entrevista de
+    onboarding com o fornecedor, não o ERP.
+
+    `pack_multiple_by_category`: por família --
+    perecível fresco vendido a peça/peso, sem fardo real (1,0): PRODUCE,
+    MEATS, POULTRY, SEAFOOD, DELI; giro rápido, fardo pequeno (6,0):
+    BREAD/BAKERY, DAIRY, EGGS, FROZEN FOODS, PREPARED FOODS; mercearia seca/
+    limpeza/higiene, fardo padrão (12,0): GROCERY I, GROCERY II, CLEANING,
+    PERSONAL CARE, HOME CARE, BABY CARE; bebidas, pallet fechado (24,0):
+    BEVERAGES, LIQUOR,WINE,BEER; bazar/não-alimentar, fardo pequeno (6,0):
+    as 15 categorias restantes.
+
+    `min_order_value_by_category`: R$ 2.000,00 para fornecedor de categoria
+    com MENOS DE 50 ITENS no canônico completo (proxy de fornecedor pequeno/
+    especializado -- entrega dedicada não se paga sozinha em volume baixo);
+    R$ 0,00 para os demais (alto volume, entrega já frequente e justificada
+    por si). Critério calculado uma vez sobre o canônico, valores
+    congelados aqui -- não recalculado em runtime.
+    """
+
+    pack_multiple_by_category: dict[str, PositiveFloat]
+    min_order_value_by_category: dict[str, NonNegativeFloat]
+
+
 class EconomicsParams(ParamsSection):
     """Margem por categoria, custo de capital, e alpha (nível de serviço-alvo) por categoria.
 
@@ -226,11 +266,89 @@ class EconomicsParams(ParamsSection):
 
 
 class GuardrailsParams(ParamsSection):
-    """Regras de guarda aplicadas depois da política, antes do pedido final (Sprint 8)."""
+    """Regras de guarda aplicadas depois da política, antes do pedido final
+    -- Sprint 13, implementadas em `motor.policy.guardrails` (CLAUDE.md,
+    emenda Sprint 17: até aqui, este bloco nunca tinha sido lido por
+    nenhuma função).
 
-    max_coverage_days: PositiveFloat
-    max_order_variation_pct: NonNegativeFloat
-    weekly_budget: NonNegativeFloat | None = None
+    Seis regras no desenho original; quatro implementadas aqui, duas
+    declaradas como não implementadas (promoção prevista -- precisa de
+    calendário promocional que o canônico não carrega; item âncora --
+    precisa de análise de cesta, fora de escopo da v1) -- ver
+    `motor.policy.guardrails.NOT_IMPLEMENTED_GUARDRAILS`.
+
+    `shelf_life_days_by_category` substitui o antigo campo escalar
+    `max_coverage_days` (nunca lido) -- VALIDADE física por FAMÍLIA de
+    categoria (perecível fresco 7 dias, giro rápido 14, bebidas 30,
+    mercearia seca e bazar 45), não um teto de negócio arbitrário e não um
+    número único para o portfólio inteiro. Decisão de negócio, não
+    estimada -- valores corretos como validade (Etapa 3.16.2).
+
+    Emenda (Etapa 3.16.2, Sprint 17): o teto EFETIVO de cobertura de
+    `motor.policy.guardrails.apply_coverage_cap` é
+    `max(shelf_life_days, risk_window_days)` -- NUNCA a validade sozinha.
+    Pedir menos que a própria janela de risco (`lead_time_days +
+    review_period_days`) garante ruptura estrutural; isso não é proteção,
+    é bug. A Etapa 3.16 original aplicou a validade como teto sem esse
+    piso: nas famílias de perecível fresco/giro rápido, a janela de risco
+    da célula de teste (lt=7/rp=14 -> 21 dias) já é maior que a validade
+    (7/14 dias) -- 100% dos itens dessas famílias batiam o teto, não
+    porque a política pedisse demais (mediana de cobertura pré-corte era
+    ~22 dias em TODAS as famílias, igual à janela), mas porque o teto era
+    fisicamente menor que o ciclo de compra testado. Quando
+    `risk_window_days > shelf_life_days`, é a guarda detectando um
+    parâmetro de fornecedor impossível para aquela família (comprar
+    hortifruti a cada 14 dias não é uma prática real) -- registrado no
+    motivo do item, não escondido atrás de um corte silencioso.
+
+    `variation_limit_multiple`/`variation_lookback_days`: sugestão acima de
+    `variation_limit_multiple` vezes a média das compras (não vendas) dos
+    últimos `variation_lookback_days` dias do item vai para revisão humana
+    -- SINALIZADA, não cortada.
+
+    `new_item_min_history_days`/`new_item_min_days_with_sales`: item com
+    menos de `new_item_min_history_days` dias desde o primeiro registro de
+    venda, OU menos de `new_item_min_days_with_sales` dias com venda no
+    histórico, é "novo" -- sai por quantidade fixa (mediana da categoria),
+    nunca por modelo.
+
+    `weekly_budget_rs`: orçamento semanal arbitrado. Recalibrado na Etapa
+    3.16.3 para R$250.000 (R$500k/ciclo de 2 semanas) -- o valor original
+    (R$200k) foi calibrado contra um total contaminado pelo teto de
+    cobertura quebrado; corrigido o teto, a necessidade real da política
+    ficou em ~R$462k/ciclo, e R$400k (o orçamento antigo x2) cortava 13,5%
+    do pedido TODA semana -- subfinanciamento crônico, não restrição de
+    caixa. Critério do novo valor: pouco ACIMA da necessidade típica, para
+    a regra disparar só em semana atípica, não toda semana. Fora do
+    orçamento, itens são cortados por ordem de margem gerada por real
+    investido (maior margem primeiro), do fim pra trás -- nunca
+    proporcionalmente.
+
+    `cash_constraint_category_floor_fraction`: piso de negócio (Etapa
+    3.16.4) -- nenhuma categoria cai abaixo desta fração do seu próprio
+    valor originalmente sugerido, qualquer que seja a margem. Sem este
+    piso, o corte por margem (acima) zerava categorias inteiras de baixa
+    margem -- perecível fresco, mercearia -- que são item ÂNCORA por
+    desenho (margem baixa DE PROPÓSITO, para trazer o cliente à loja),
+    exatamente o padrão que faz um dono de mercado achar que o sistema não
+    entende varejo. Valor de 0,60 é ARBITRADO -- critério: preserva
+    presença de gôndola em toda categoria, cortando fundo o suficiente
+    (40%) para a restrição de caixa ainda ter efeito real; não é resultado
+    de otimização. Quando a SOMA dos pisos de todas as categorias sozinha
+    excede o orçamento, a guarda não tenta preservar todos -- corta por
+    margem MÉDIA da categoria sobre os próprios pisos (ver
+    `motor.policy.guardrails.apply_cash_constraint`) e registra um alerta
+    separado: isso significa que o orçamento não cobre nem o mínimo
+    operacional da loja, informação de negócio, não detalhe de algoritmo.
+    """
+
+    shelf_life_days_by_category: dict[str, PositiveFloat]
+    variation_limit_multiple: PositiveFloat
+    variation_lookback_days: PositiveInt
+    new_item_min_history_days: PositiveInt
+    new_item_min_days_with_sales: PositiveInt
+    weekly_budget_rs: PositiveFloat
+    cash_constraint_category_floor_fraction: Fraction
 
 
 class FeatureCalendarParams(ParamsSection):
@@ -408,6 +526,7 @@ class Params(ParamsSection):
     erp_baseline: ErpBaselineParams
     supplier_assumptions: SupplierAssumptionsParams
     supplier_order_policy: SupplierOrderPolicyParams
+    purchase_list_supplier_assumptions: PurchaseListSupplierAssumptionsParams
     economics: EconomicsParams
     guardrails: GuardrailsParams
     features: FeaturesParams
