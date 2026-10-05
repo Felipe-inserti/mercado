@@ -7,7 +7,7 @@ resultados já produzidos pelas Sprints 17/18/19 e montagem das lâminas.
 Rodar depois que `results/iso_servico/`, `results/baseline_desatualizado/`
 e `results/lista_compra/2017-03-06/` já existirem.
 
-    python notebooks/sprint20_apresentacao.py
+    python notebooks/gerar_apresentacao.py
 
 Ordem das lâminas (pedida na Etapa 4.3), e por que cada uma está onde está:
 
@@ -64,12 +64,15 @@ from matplotlib.patches import FancyBboxPatch
 
 from motor.experiments.iso_service import CELL_LEAD_TIME_DAYS, CELL_REVIEW_PERIOD_DAYS
 from motor.reporting.monthly_report import (
+    ROTULO_ILUSTRATIVO,
     STALE_LABEL_HEADLINE,
     load_motor_financials,
     load_recalibrado_financials,
     load_stale_financials,
     mensalizar,
+    reducao_relativa_ruptura,
     sensibilidade_margem,
+    variacao_relativa_capital,
 )
 
 RESULTS_DIR: Final[Path] = Path("results")
@@ -142,7 +145,9 @@ def _title_bar(ax: plt.Axes, numero: str, titulo: str, subtitulo: str = "") -> N
 
 
 def _footnote(ax: plt.Axes, text: str) -> None:
-    wrapped = "\n".join(textwrap.wrap(text, width=150))
+    # `$` escapado: dois "R$" no mesmo rodapé viravam fórmula (mathtext) e
+    # embaralhavam o texto -- visto na lâmina 3 ao trocar o R$ por relativo.
+    wrapped = "\n".join(textwrap.wrap(text, width=150)).replace("$", r"\$")
     ax.text(0.55, 0.32, wrapped, fontsize=9.5, color=MUTED, va="top", style="italic")
 
 
@@ -216,6 +221,8 @@ def _dados() -> dict[str, object]:
     stale = load_stale_financials(STALE_LABEL_HEADLINE)
     ruptura_evitada_mensal = mensalizar(stale.ruptura_rs - recalibrado.ruptura_rs)
     faixa = sensibilidade_margem(stale.ruptura_rs - recalibrado.ruptura_rs)
+    reducao_ruptura_pct = reducao_relativa_ruptura(stale, recalibrado)
+    variacao_capital_pct = variacao_relativa_capital(stale, recalibrado)
     aumento_capital_mensal = mensalizar(recalibrado.capital_medio_rs - stale.capital_medio_rs)
     capital_liberado_pct = (
         recalibrado.capital_medio_rs - motor.capital_medio_rs
@@ -230,6 +237,8 @@ def _dados() -> dict[str, object]:
         "ruptura_evitada_mensal": ruptura_evitada_mensal,
         "ruptura_evitada_mensal_menos30": mensalizar(faixa[0.7]),
         "ruptura_evitada_mensal_mais30": mensalizar(faixa[1.3]),
+        "reducao_ruptura_pct": reducao_ruptura_pct,
+        "variacao_capital_pct": variacao_capital_pct,
         "aumento_capital_mensal": aumento_capital_mensal,
         "capital_liberado_pct": capital_liberado_pct,
         "decision_metric_pct": decision_metric_pct,
@@ -340,9 +349,9 @@ def slide_diagnostico(dados: dict[str, object]) -> plt.Figure:
         y=1.55,
         w=3.6,
         h=2.4,
-        value=f"R$ {dados['ruptura_evitada_mensal']:,.0f}",
-        label="margem perdida em ruptura, por mês, medida contra o baseline já corrigido",
-        color=AMBER,
+        value=f"{dados['nivel_servico_recalibrado']:.0%}",
+        label="nível de serviço com o fator recalibrado para o lead time de hoje",
+        color=TEAL,
     )
     _big_number(
         ax,
@@ -350,19 +359,17 @@ def slide_diagnostico(dados: dict[str, object]) -> plt.Figure:
         y=1.55,
         w=4.1,
         h=2.4,
-        value="±30%",
-        label=(
-            f"faixa de margem: R$ {dados['ruptura_evitada_mensal_menos30']:,.0f} a "
-            f"R$ {dados['ruptura_evitada_mensal_mais30']:,.0f} / mês"
-        ),
+        value=f"-{dados['reducao_ruptura_pct']:.0%}",
+        label="da ruptura (em R$ de margem não realizada) some só corrigindo o fator",
         color=NAVY,
     )
     _footnote(
         ax,
-        "Nunca o número sozinho: margem por categoria é premissa ARBITRADA (analogia com "
-        "varejo brasileiro, não medida neste cliente) -- a faixa de ±30% é a magnitude de "
-        "erro que este diagnóstico declara suportar. Medido por simulação sobre o padrão de "
-        "vendas passado real, célula única (lt=7/rp=14).",
+        "Em R$ -- " + ROTULO_ILUSTRATIVO + f": margem recuperada de R$ "
+        f"{dados['ruptura_evitada_mensal']:,.0f}/mês (faixa ±30%: R$ "
+        f"{dados['ruptura_evitada_mensal_menos30']:,.0f} a R$ "
+        f"{dados['ruptura_evitada_mensal_mais30']:,.0f}). Medido por simulação sobre o "
+        "padrão de vendas passado real, célula única (lt=7/rp=14).",
     )
     return fig
 
@@ -398,8 +405,8 @@ def slide_andar1(dados: dict[str, object]) -> plt.Figure:
         y=1.6,
         w=4.7,
         h=2.5,
-        value=f"+R$ {dados['aumento_capital_mensal']:,.0f} / mês",
-        label="capital adicional necessário -- servir mais exige estocar mais, não menos",
+        value=f"{dados['variacao_capital_pct']:+.0%}",
+        label="capital médio empregado -- servir mais exige estocar mais, não menos",
         color=AMBER,
     )
     ax.text(
@@ -415,8 +422,8 @@ def slide_andar1(dados: dict[str, object]) -> plt.Figure:
     _footnote(
         ax,
         "Aumento de capital, não liberação -- é o espelho do resgate de serviço (sub-abastecer "
-        "amarra menos capital; corrigir isso amarra mais). Premissas: custo de capital "
-        "arbitrado (config), célula lt=7/rp=14.",
+        "amarra menos capital; corrigir isso amarra mais). Em R$ -- " + ROTULO_ILUSTRATIVO
+        + f": +R$ {dados['aumento_capital_mensal']:,.0f}/mês. Célula lt=7/rp=14.",
     )
     return fig
 

@@ -120,6 +120,13 @@ sobre um mês de verdade nesta etapa). Ver docstring do módulo."""
 
 TOP_N_ITENS_SANGRANDO: Final[int] = 20
 
+ROTULO_ILUSTRATIVO: Final[str] = "ilustrativo -- preço uniforme de R$ 10, margem arbitrada"
+"""Todo valor ABSOLUTO em R$ deste relatório sai de `uniform_unit_price`
+(params.yaml) e de margens por categoria arbitradas, aplicados a dado de
+loja do Equador -- não sustenta valor absoluto, só relativo. Os indicadores
+relativos (nível de serviço, variação % de capital e de ruptura, margem por
+real) são o que o relatório afirma; o R$ vai sempre com este rótulo."""
+
 STALE_LABEL_HEADLINE: Final[str] = "calibrado_lt3_rp7"
 """Magnitude usada como número de manchete do Andar 1 -- a mais provável
 de bater com "o fornecedor mudou de lead_time e ninguém atualizou o ERP"
@@ -231,6 +238,19 @@ def ruptura_evitada(pior: ArmFinancials, melhor: ArmFinancials) -> float:
 
 def capital_liberado(pior: ArmFinancials, melhor: ArmFinancials) -> float:
     return pior.capital_medio_rs - melhor.capital_medio_rs
+
+
+def variacao_relativa_capital(pior: ArmFinancials, melhor: ArmFinancials) -> float:
+    """(capital de `melhor` / capital de `pior`) - 1. Calculado dos
+    resultados, nunca escrito à mão. Andar 1: positivo (recalibrar exige
+    mais capital)."""
+    return melhor.capital_medio_rs / pior.capital_medio_rs - 1
+
+
+def reducao_relativa_ruptura(pior: ArmFinancials, melhor: ArmFinancials) -> float:
+    """Fração da ruptura (R$) de `pior` eliminada em `melhor` -- relativa, logo
+    independente do preço uniforme arbitrado."""
+    return 1 - melhor.ruptura_rs / pior.ruptura_rs
 
 
 def perda_evitada(pior: ArmFinancials, melhor: ArmFinancials) -> float:
@@ -355,37 +375,58 @@ def _write_resumo_cabecalho(sheet: object, data: _ReportData, fmt: _Formats) -> 
         "(iso-serviço). Célula lead_time=7/review_period=14 -- ver aba Premissas.",
     )
     sheet.set_row(1, 30)  # type: ignore[attr-defined]
-    return 3
+    sheet.write(  # type: ignore[attr-defined]
+        2,
+        0,
+        "Indicadores relativos primeiro. Valores em R$: " + ROTULO_ILUSTRATIVO + ".",
+        fmt.note,
+    )
+    sheet.set_row(2, 30)  # type: ignore[attr-defined]
+    return 4
 
 
 def _write_resumo_andar1_bloco(sheet: object, r: int, data: _ReportData, fmt: _Formats) -> int:
     stale_headline = data.stale[STALE_LABEL_HEADLINE]
+    ruptura_evitada_total = data.andar1_ruptura_evitada[STALE_LABEL_HEADLINE]
     sheet.write(r, 0, "ANDAR 1 -- CORREÇÃO DE CADASTRO (recalibrar, sem modelo)", fmt.header)  # type: ignore[attr-defined]
     sheet.write(r, 1, "", fmt.header)  # type: ignore[attr-defined]
     r += 1
-    sheet.write(  # type: ignore[attr-defined]
-        r, 0, f"Ruptura evitada (margem recuperada) -- mensal, magnitude {STALE_LABEL_HEADLINE}"
-    )
-    sheet.write_number(  # type: ignore[attr-defined]
-        r, 1, mensalizar(data.andar1_ruptura_evitada[STALE_LABEL_HEADLINE]), fmt.money
-    )
-    r += 1
-    faixa = sensibilidade_margem(data.andar1_ruptura_evitada[STALE_LABEL_HEADLINE])
-    sheet.write(r, 0, "  faixa de sensibilidade de margem (±30%, mensal) -- ver aba Andar 1")  # type: ignore[attr-defined]
-    sheet.write(r, 1, f"{mensalizar(faixa[0.7]):,.2f} a {mensalizar(faixa[1.3]):,.2f}")  # type: ignore[attr-defined]
-    r += 1
-    sheet.write(r, 0, "Nível de serviço: de")  # type: ignore[attr-defined]
+    sheet.write(r, 0, f"Nível de serviço: de ({STALE_LABEL_HEADLINE})")  # type: ignore[attr-defined]
     sheet.write_number(r, 1, stale_headline.nivel_servico, fmt.pct)  # type: ignore[attr-defined]
     r += 1
     sheet.write(r, 0, "  para (baseline recalibrado)")  # type: ignore[attr-defined]
     sheet.write_number(r, 1, data.recalibrado.nivel_servico, fmt.pct)  # type: ignore[attr-defined]
     r += 1
+    sheet.write(r, 0, "Ruptura (R$) eliminada -- % da ruptura do baseline desatualizado")  # type: ignore[attr-defined]
+    sheet.write_number(  # type: ignore[attr-defined]
+        r, 1, reducao_relativa_ruptura(stale_headline, data.recalibrado), fmt.pct
+    )
+    r += 1
     sheet.write(  # type: ignore[attr-defined]
         r,
         0,
-        "  custo: aumento de capital empregado -- mensal (recalibrar exige mais estoque, "
+        "Custo: variação de capital médio empregado (recalibrar exige mais estoque, "
         "não libera; ver aba Andar 1)",
     )
+    sheet.write_number(  # type: ignore[attr-defined]
+        r, 1, variacao_relativa_capital(stale_headline, data.recalibrado), fmt.pct
+    )
+    r += 1
+    sheet.write(  # type: ignore[attr-defined]
+        r, 0, f"Em R$ por mês -- {ROTULO_ILUSTRATIVO}", fmt.note
+    )
+    sheet.set_row(r, 30)  # type: ignore[attr-defined]
+    r += 1
+    sheet.write(  # type: ignore[attr-defined]
+        r, 0, f"  ruptura evitada (margem recuperada), magnitude {STALE_LABEL_HEADLINE}"
+    )
+    sheet.write_number(r, 1, mensalizar(ruptura_evitada_total), fmt.money)  # type: ignore[attr-defined]
+    r += 1
+    faixa = sensibilidade_margem(ruptura_evitada_total)
+    sheet.write(r, 0, "  faixa de sensibilidade de margem (±30%) -- ver aba Andar 1")  # type: ignore[attr-defined]
+    sheet.write(r, 1, f"{mensalizar(faixa[0.7]):,.2f} a {mensalizar(faixa[1.3]):,.2f}")  # type: ignore[attr-defined]
+    r += 1
+    sheet.write(r, 0, "  aumento de capital empregado")  # type: ignore[attr-defined]
     sheet.write_number(  # type: ignore[attr-defined]
         r, 1, mensalizar(data.andar1_aumento_capital[STALE_LABEL_HEADLINE]), fmt.money
     )
@@ -396,17 +437,16 @@ def _write_resumo_andar2_bloco(sheet: object, r: int, data: _ReportData, fmt: _F
     sheet.write(r, 0, "ANDAR 2 -- REFINAMENTO DO MODELO (sobre baseline já certo)", fmt.header)  # type: ignore[attr-defined]
     sheet.write(r, 1, "", fmt.header)  # type: ignore[attr-defined]
     r += 1
-    sheet.write(r, 0, "Capital liberado -- mensal (equivalente, ver nota)")  # type: ignore[attr-defined]
-    sheet.write_number(r, 1, mensalizar(data.andar2_capital_liberado), fmt.money)  # type: ignore[attr-defined]
-    r += 1
     sheet.write(  # type: ignore[attr-defined]
-        r,
-        0,
-        "Capital liberado -- % vs. baseline recalibrado "
-        f"({data.recalibrado.capital_medio_rs:,.2f})",
+        r, 0, "Capital médio empregado -- variação vs. baseline recalibrado (negativo = libera)"
     )
     sheet.write_number(  # type: ignore[attr-defined]
-        r, 1, data.andar2_capital_liberado / data.recalibrado.capital_medio_rs, fmt.pct
+        r, 1, -data.andar2_capital_liberado / data.recalibrado.capital_medio_rs, fmt.pct
+    )
+    r += 1
+    sheet.write(r, 0, "Margem por real investido -- variação vs. baseline recalibrado")  # type: ignore[attr-defined]
+    sheet.write_number(  # type: ignore[attr-defined]
+        r, 1, data.motor.decision_metric / data.recalibrado.decision_metric - 1, fmt.pct
     )
     r += 1
     sheet.write(r, 0, "decision_metric: baseline recalibrado")  # type: ignore[attr-defined]
@@ -416,10 +456,20 @@ def _write_resumo_andar2_bloco(sheet: object, r: int, data: _ReportData, fmt: _F
     sheet.write_number(r, 1, data.motor.decision_metric, fmt.number)  # type: ignore[attr-defined]
     r += 1
     sheet.write(  # type: ignore[attr-defined]
+        r, 0, f"Em R$ por mês -- {ROTULO_ILUSTRATIVO}", fmt.note
+    )
+    sheet.set_row(r, 30)  # type: ignore[attr-defined]
+    r += 1
+    sheet.write(  # type: ignore[attr-defined]
+        r, 0, "  capital liberado (equivalente, ver nota)"
+    )
+    sheet.write_number(r, 1, mensalizar(data.andar2_capital_liberado), fmt.money)  # type: ignore[attr-defined]
+    r += 1
+    sheet.write(  # type: ignore[attr-defined]
         r,
         0,
-        "Margem recuperada adicional pelo modelo -- mensal (pequena de propósito: "
-        "mesmo nível de serviço do baseline recalibrado, por construção iso-serviço)",
+        "  margem recuperada adicional pelo modelo (pequena de propósito: mesmo nível de "
+        "serviço do baseline recalibrado, por construção iso-serviço)",
     )
     sheet.write_number(r, 1, mensalizar(data.andar2_ruptura_evitada), fmt.money)  # type: ignore[attr-defined]
     return r + 2
@@ -452,6 +502,12 @@ def _write_resumo_sheet(workbook: xlsxwriter.Workbook, data: _ReportData, fmt: _
     _write_resumo_rodape(sheet, r, fmt)
 
 
+def _write_aviso_ilustrativo(sheet: object, fmt: _Formats) -> None:
+    """Aviso de uma linha no topo das abas de detalhe com valor absoluto em R$.
+    As abas escrevem seu cabeçalho na linha 1 (0-indexado) e dados dali pra baixo."""
+    sheet.write(0, 0, f"Valores em R$: {ROTULO_ILUSTRATIVO}.", fmt.note)  # type: ignore[attr-defined]
+
+
 def _write_andar1_sheet(workbook: xlsxwriter.Workbook, data: _ReportData, fmt: _Formats) -> None:
     sheet = workbook.add_worksheet("Andar 1 - Correção de cadastro")
     sheet.set_column(0, 0, 46)
@@ -461,8 +517,9 @@ def _write_andar1_sheet(workbook: xlsxwriter.Workbook, data: _ReportData, fmt: _
         *(f"desatualizado ({label})" for label in STALE_SOURCES),
         "recalibrado",
     )
+    _write_aviso_ilustrativo(sheet, fmt)
     for c, h in enumerate(headers):
-        sheet.write(0, c, h, fmt.header)
+        sheet.write(1, c, h, fmt.header)
 
     stale = data.stale
     recalibrado = data.recalibrado
@@ -494,7 +551,7 @@ def _write_andar1_sheet(workbook: xlsxwriter.Workbook, data: _ReportData, fmt: _
             fmt.number,
         ),
     ]
-    r = 1
+    r = 2
     for _nome, valores, cell_fmt in linhas:
         sheet.write(r, 0, _nome)
         for c, v in enumerate(valores, start=1):
@@ -572,8 +629,9 @@ def _write_andar2_sheet(workbook: xlsxwriter.Workbook, data: _ReportData, fmt: _
     sheet = workbook.add_worksheet("Andar 2 - Refinamento do modelo")
     sheet.set_column(0, 0, 46)
     sheet.set_column(1, 2, 22)
+    _write_aviso_ilustrativo(sheet, fmt)
     for c, h in enumerate(("indicador", "baseline recalibrado", "motor")):
-        sheet.write(0, c, h, fmt.header)
+        sheet.write(1, c, h, fmt.header)
 
     recalibrado, motor = data.recalibrado, data.motor
     linhas = [
@@ -588,7 +646,7 @@ def _write_andar2_sheet(workbook: xlsxwriter.Workbook, data: _ReportData, fmt: _
             fmt.money,
         ),
     ]
-    r = 1
+    r = 2
     for nome, a, b, cell_fmt in linhas:
         sheet.write(r, 0, nome)
         sheet.write_number(r, 1, a, cell_fmt)
@@ -635,13 +693,14 @@ _SANGRANDO_HEADERS: Final[tuple[str, ...]] = (
 
 def _write_sangrando_sheet(workbook: xlsxwriter.Workbook, fmt: _Formats) -> None:
     sheet = workbook.add_worksheet("Itens sangrando margem")
+    _write_aviso_ilustrativo(sheet, fmt)
     for c, h in enumerate(_SANGRANDO_HEADERS):
-        sheet.write(0, c, h, fmt.header)
+        sheet.write(1, c, h, fmt.header)
     for c, w in enumerate((12, 20, 16, 12, 12, 12, 20, 16, 22, 20)):
         sheet.set_column(c, c, w)
 
     df = itens_sangrando_margem()
-    for r_idx, row in enumerate(df.iter_rows(named=True), start=1):
+    for r_idx, row in enumerate(df.iter_rows(named=True), start=2):
         sheet.write(r_idx, 0, row["item_id"])
         sheet.write(r_idx, 1, row["category"])
         sheet.write(r_idx, 2, row["unit_of_sale"])
@@ -652,9 +711,9 @@ def _write_sangrando_sheet(workbook: xlsxwriter.Workbook, fmt: _Formats) -> None
         sheet.write_number(r_idx, 7, row["ruptura_rs"], fmt.money)
         sheet.write_number(r_idx, 8, row["pct_margem_potencial_perdida"], fmt.pct)
         sheet.write_number(r_idx, 9, row["nivel_servico"], fmt.pct)
-    sheet.autofilter(0, 0, df.height, len(_SANGRANDO_HEADERS) - 1)
+    sheet.autofilter(1, 0, df.height + 1, len(_SANGRANDO_HEADERS) - 1)
 
-    note_row = df.height + 2
+    note_row = df.height + 3
     sheet.write(
         note_row,
         0,

@@ -17,3 +17,7 @@ __pycache__/
 htmlcov/
 *.egg-info/
 graphify-out/
+
+# Claude Code: configuração local (caminhos da máquina) e lock de sessão
+.claude/settings.local.json
+.claude/scheduled_tasks.lock

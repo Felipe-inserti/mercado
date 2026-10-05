@@ -37,4 +37,5 @@ class Policy(Protocol):
     """Decide quanto pedir para um par loja-item."""
 
     def order(self, ctx: DecisionContext) -> float:
-        """Unidades a pedir, antes das regras de guarda (sprint futura: ainda não existem)."""
+        """Unidades a pedir, antes das regras de guarda (`motor.policy.guardrails`,
+        aplicadas na lista de compra, não no simulador)."""
