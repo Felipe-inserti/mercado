@@ -422,7 +422,8 @@ def slide_andar1(dados: dict[str, object]) -> plt.Figure:
     _footnote(
         ax,
         "Aumento de capital, não liberação -- é o espelho do resgate de serviço (sub-abastecer "
-        "amarra menos capital; corrigir isso amarra mais). Em R$ -- " + ROTULO_ILUSTRATIVO
+        "amarra menos capital; corrigir isso amarra mais). Em R$ -- "
+        + ROTULO_ILUSTRATIVO
         + f": +R$ {dados['aumento_capital_mensal']:,.0f}/mês. Célula lt=7/rp=14.",
     )
     return fig

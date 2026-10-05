@@ -644,9 +644,7 @@ def test_retrain_dates_bate_exato_com_dias_de_decisao_do_simulador_review_period
     de contagem: um desvio de um dia com a mesma quantidade de datas não
     apareceria comparando só `len()`."""
     base = load_params(PARAMS_PATH)
-    cell_params = build_cell_params(
-        base, alpha=base.economics.default_alpha, review_period_days=14
-    )
+    cell_params = build_cell_params(base, alpha=base.economics.default_alpha, review_period_days=14)
     # build_cell_params amarra retrain_cadence_days a review_period_days -- checagem
     # explícita de que não sobrou nenhum "7" fixo no caminho.
     assert cell_params.model.retrain_cadence_days == 14

@@ -347,12 +347,8 @@ _ERP_MIN_ORDER_GRID: Final[tuple[float, ...]] = (0.0, 1.0, 3.0, 5.0, 10.0)
 _ERP_TARGET_SERVICE_LEVEL: Final[float] = 0.95
 
 
-def directed_cell_dir(
-    results_root: Path, *, lead_time_days: int, review_period_days: int
-) -> Path:
-    return (
-        results_root / "sensibilidade_dirigida" / f"lt{lead_time_days}_rp{review_period_days}"
-    )
+def directed_cell_dir(results_root: Path, *, lead_time_days: int, review_period_days: int) -> Path:
+    return results_root / "sensibilidade_dirigida" / f"lt{lead_time_days}_rp{review_period_days}"
 
 
 def build_directed_cell_params(
@@ -388,9 +384,7 @@ def build_directed_cell_params(
     """
     grade = set(base_params.model.quantiles)
     if alpha is not None and alpha not in grade:
-        msg = (
-            f"alpha={alpha!r} não está em model.quantiles={list(base_params.model.quantiles)!r}"
-        )
+        msg = f"alpha={alpha!r} não está em model.quantiles={list(base_params.model.quantiles)!r}"
         raise ValueError(msg)
     update: dict[str, Any] = {
         "model": base_params.model.model_copy(update={"retrain_cadence_days": review_period_days}),
@@ -521,9 +515,7 @@ def run_directed_unit(
     )
     item_ids = list(subset.item_ids)
     sales_subset = (
-        sales.filter(
-            (pl.col("store_id") == subset.store_id) & (pl.col("item_id").is_in(item_ids))
-        )
+        sales.filter((pl.col("store_id") == subset.store_id) & (pl.col("item_id").is_in(item_ids)))
         .select("item_id", "date", "units_sold")
         .sort("item_id", "date")
         .collect()
@@ -856,7 +848,11 @@ def run_grid(
     sales, items, suppliers, stock = _load_canonical(params)
     subset_cache_path = results_dir / "subset_selection.json"
     warm_subset_cache(
-        params, sales=sales, items=items, suppliers=suppliers, stock=stock,
+        params,
+        sales=sales,
+        items=items,
+        suppliers=suppliers,
+        stock=stock,
         subset_cache_path=subset_cache_path,
     )
     print(f"subset_selection.json pronto em {subset_cache_path}")
@@ -869,7 +865,10 @@ def run_grid(
         if force
         or not all(
             _cell_is_done(
-                results_dir, lead_time_days=lt, alpha=a, arm_name=arm,
+                results_dir,
+                lead_time_days=lt,
+                alpha=a,
+                arm_name=arm,
                 expected_quantiles=expected_quantiles,
             )
             for a in alphas
@@ -1051,8 +1050,7 @@ def main(argv: list[str] | None = None) -> None:
         "--measure-one",
         action="store_true",
         help=(
-            "roda o plano de sondagem (5 células) e projeta o custo das 75 "
-            "-- não a varredura cheia"
+            "roda o plano de sondagem (5 células) e projeta o custo das 75 -- não a varredura cheia"
         ),
     )
     parser.add_argument(

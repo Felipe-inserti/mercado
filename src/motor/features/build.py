@@ -209,9 +209,7 @@ def build_features(
     )
     result = result.join(attrs, on="item_id", how="left")
 
-    calendar_for_join = calendar.select(
-        pl.col("date").alias("as_of"), pl.exclude("date")
-    )
+    calendar_for_join = calendar.select(pl.col("date").alias("as_of"), pl.exclude("date"))
     result = result.with_columns(pl.lit(as_of).alias("as_of"))
     result = result.join(calendar_for_join, on="as_of", how="left")
     result = result.with_columns(pl.lit(store_id).alias("store_id"))

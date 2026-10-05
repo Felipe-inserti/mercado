@@ -68,9 +68,7 @@ def _features(dates: list[date], holidays: pl.DataFrame) -> pl.DataFrame:
 def test_feriado_nacional_aplica_independente_de_locale_name() -> None:
     """National aplica a toda loja -- não filtra por `locale_name` (só há um país)."""
     d = date(2016, 8, 10)
-    holidays = _holidays(
-        _holiday_row(d, type_="Holiday", locale="National", locale_name="Ecuador")
-    )
+    holidays = _holidays(_holiday_row(d, type_="Holiday", locale="National", locale_name="Ecuador"))
     out = _features([d], holidays)
     assert out["is_holiday_national"][0] is True
     assert out["is_holiday_regional"][0] is False
@@ -103,9 +101,7 @@ def test_holiday_transferred_true_nao_conta_na_data_original() -> None:
     dia, carregado por uma linha `type=Transfer` separada (ver teste seguinte)."""
     d = date(2016, 8, 10)
     holidays = _holidays(
-        _holiday_row(
-            d, type_="Holiday", locale="National", locale_name="Ecuador", transferred=True
-        )
+        _holiday_row(d, type_="Holiday", locale="National", locale_name="Ecuador", transferred=True)
     )
     out = _features([d], holidays)
     assert out["is_holiday_national"][0] is False

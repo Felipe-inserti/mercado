@@ -255,9 +255,7 @@ def test_features_nao_vazam_futuro_para_cada_as_of_da_matriz() -> None:
             params=_params(),
         )
         obtido = matriz.filter(pl.col("as_of") == as_of)
-        assert_frame_equal(
-            obtido.sort("item_id"), esperado.sort("item_id"), check_exact=True
-        )
+        assert_frame_equal(obtido.sort("item_id"), esperado.sort("item_id"), check_exact=True)
 
 
 # -- buraco de calendário: item `novo` ---------------------------------------
@@ -313,9 +311,7 @@ def test_item_intermitente_dias_desde_ultima_venda_e_proporcao() -> None:
     # antes de as_of "na unha" a partir do mesmo gerador do fixture
     start = _AS_OF - timedelta(days=80)
     last_sale_date = max(
-        start + timedelta(days=k)
-        for k in range((_AS_OF - start).days)
-        if k % 5 == 0
+        start + timedelta(days=k) for k in range((_AS_OF - start).days) if k % 5 == 0
     )
     assert out["days_since_last_sale"] == (_AS_OF - last_sale_date).days
 
