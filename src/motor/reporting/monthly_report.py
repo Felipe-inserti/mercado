@@ -91,7 +91,11 @@ import polars as pl
 import xlsxwriter
 
 from motor.config import load_params
-from motor.experiments.iso_service import ARM2_CHOSEN_ALPHA
+from motor.experiments.iso_service import (
+    ARM2_CHOSEN_ALPHA,
+    CELL_LEAD_TIME_DAYS,
+    CELL_REVIEW_PERIOD_DAYS,
+)
 from motor.experiments.stale_baseline import (
     STALE_SOURCES,
     ScenarioMetrics,
@@ -828,10 +832,8 @@ def _write_limitacoes_sheet(workbook: xlsxwriter.Workbook, fmt: _Formats) -> Non
         sheet.set_row(r_idx, 60)
 
 
-def write_monthly_report_workbook(out_path: Path) -> Path:
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    workbook = xlsxwriter.Workbook(str(out_path))
-    fmt = _Formats(
+def _make_formats(workbook: xlsxwriter.Workbook) -> _Formats:
+    return _Formats(
         header=workbook.add_format(_HEADER_FORMAT_SPEC),
         money=workbook.add_format({"num_format": "R$ #,##0.00"}),
         number=workbook.add_format({"num_format": "#,##0.00"}),
@@ -840,7 +842,223 @@ def write_monthly_report_workbook(out_path: Path) -> Path:
         bold=workbook.add_format({"bold": True}),
     )
 
+
+_VISUAL_SHEET_NAME: Final[str] = "Resumo visual"
+_NAVY: Final[str] = "#1f3864"
+_INK: Final[str] = "#0b0b0b"
+_ORANGE: Final[str] = "#eb6834"  # ERP desatualizado -- slots 2/1/3 da paleta categórica validada
+_BLUE: Final[str] = "#2a78d6"  # ERP recalibrado
+_AQUA: Final[str] = "#1baf7a"  # motor
+_MUTED: Final[str] = "#6b6b6b"
+_CHART_SIZE: Final[dict[str, int]] = {"width": 340, "height": 190}
+_VISUAL_CHART_ROWS: Final[int] = 10  # linhas ocupadas por um gráfico de 190 px (20 px por linha)
+
+
+def _pt(value: float, digits: int = 1) -> str:
+    """Porcentagem com vírgula decimal, como no resto do relatório em português."""
+    return f"{value * 100:.{digits}f}%".replace(".", ",")
+
+
+def _write_visual_block(
+    sheet: object,
+    r: int,
+    *,
+    label: str,
+    big: float | str,
+    big_format: object,
+    lines: tuple[str, ...],
+    source: str,
+    fmt: dict[str, object],
+) -> int:
+    """Um bloco: rótulo, número grande, legendas e a origem em letra pequena."""
+    sheet.write(r, 0, label, fmt["label"])  # type: ignore[attr-defined]
+    if isinstance(big, str):
+        sheet.write(r + 1, 0, big, big_format)  # type: ignore[attr-defined]
+    else:
+        sheet.write_number(r + 1, 0, big, big_format)  # type: ignore[attr-defined]
+    sheet.set_row(r + 1, 46)  # type: ignore[attr-defined]
+    r += 2
+    for line in lines:
+        sheet.write(r, 0, line, fmt["caption"])  # type: ignore[attr-defined]
+        sheet.set_row(r, 32)  # type: ignore[attr-defined]
+        r += 1
+    sheet.write(r, 0, source, fmt["source"])  # type: ignore[attr-defined]
+    sheet.set_row(r, 30)  # type: ignore[attr-defined]
+    return r + 2
+
+
+def _write_visual_sheet(workbook: xlsxwriter.Workbook, data: _ReportData, fmt: _Formats) -> None:
+    """Primeira aba (Sprint 23): três números grandes e dois gráficos pequenos, em UMA coluna
+    para abrir no celular. Todos os números saem dos resultados (as mesmas funções do resto do
+    relatório), nenhum é digitado; a tabela "Dados dos gráficos" na própria aba é a origem dos
+    gráficos. R$ não aparece aqui -- só relativos."""
+    stale = data.stale[STALE_LABEL_HEADLINE]
+    recal, motor = data.recalibrado, data.motor
+    cap_andar1 = variacao_relativa_capital(stale, recal)
+    cap_andar2 = motor.capital_medio_rs / recal.capital_medio_rs - 1
+    margem_andar2 = motor.decision_metric / recal.decision_metric - 1
+    cell = f"lead time {CELL_LEAD_TIME_DAYS} / revisão {CELL_REVIEW_PERIOD_DAYS}"
+
+    sheet = workbook.add_worksheet(_VISUAL_SHEET_NAME)
+    sheet.activate()
+    sheet.set_column(0, 0, 46)
+    sheet.set_column(1, 2, 16)
+    f: dict[str, object] = {
+        "title": workbook.add_format({"bold": True, "font_size": 16, "font_color": _NAVY}),
+        "label": workbook.add_format({"bold": True, "font_size": 10, "font_color": _MUTED}),
+        "caption": workbook.add_format({"text_wrap": True, "valign": "top", "font_size": 10}),
+        "source": workbook.add_format(
+            {
+                "text_wrap": True,
+                "valign": "top",
+                "font_size": 8,
+                "font_color": _MUTED,
+                "italic": True,
+            }
+        ),
+        "intro": workbook.add_format({"text_wrap": True, "valign": "top", "font_size": 10}),
+    }
+    big_text = workbook.add_format(
+        {"bold": True, "font_size": 32, "font_color": _INK, "valign": "vcenter"}
+    )
+    big_cost = workbook.add_format(
+        {
+            "bold": True,
+            "font_size": 32,
+            "font_color": _INK,
+            "num_format": "+0%;-0%",
+            "align": "left",
+        }
+    )
+    big_gain = workbook.add_format(
+        {
+            "bold": True,
+            "font_size": 32,
+            "font_color": _INK,
+            "num_format": "+0.0%;-0.0%",
+            "align": "left",
+        }
+    )
+
+    sheet.write(0, 0, "RELATÓRIO MENSAL -- RESUMO", f["title"])
+    sheet.write(
+        1,
+        0,
+        f"Backtest de {data.window['n_evaluation_days']} dias sobre o dado do Favorita, célula "
+        f"{cell}. Só números relativos; R$ nas outras abas é ilustrativo (preço uniforme de "
+        "R$ 10, margem arbitrada).",
+        f["intro"],
+    )
+    sheet.set_row(1, 44)
+
+    r = 3
+    r = _write_visual_block(
+        sheet, r, label="NÍVEL DE SERVIÇO",
+        big=f"{stale.nivel_servico:.0%} → {recal.nivel_servico:.0%}", big_format=big_text,
+        lines=(
+            f"De cada 100 unidades que o cliente quis comprar, {stale.nivel_servico * 100:.0f} "
+            f"eram atendidas com o cadastro desatualizado e {recal.nivel_servico * 100:.0f} "
+            "depois de recalibrar (Andar 1).",
+            f"Andar 2: motor {_pt(motor.nivel_servico)} contra {_pt(recal.nivel_servico)} do "
+            "baseline recalibrado -- mesmo serviço, por construção (iso-serviço).",
+        ),
+        source="Fonte: results/baseline_desatualizado (calibrado_lt3_rp7), "
+        "results/sensibilidade_dirigida/lt7_rp14 e results/iso_servico (alpha 0,66).",
+        fmt=f,
+    )  # fmt: skip
+    r = _write_visual_block(
+        sheet, r, label="CAPITAL PARADO",
+        big=cap_andar1, big_format=big_cost,
+        lines=(
+            f"Capital médio empregado para sair de {stale.nivel_servico:.0%} para "
+            f"{recal.nivel_servico:.0%} de serviço (Andar 1): servir mais exige estocar mais, "
+            "não menos.",
+            f"Andar 2: {_pt(cap_andar2).replace('-', '−')} no mesmo serviço (motor contra o "  # noqa: RUF001
+            "baseline recalibrado).",
+        ),
+        source="Fonte: capital_medio_rs de results/baseline_desatualizado, "
+        "results/sensibilidade_dirigida/lt7_rp14 e results/iso_servico.",
+        fmt=f,
+    )  # fmt: skip
+    r = _write_visual_block(
+        sheet, r, label="MARGEM POR REAL INVESTIDO",
+        big=margem_andar2, big_format=big_gain,
+        lines=(
+            "Andar 2: motor contra o baseline já recalibrado, no mesmo nível de serviço. É o "
+            "ganho do modelo; o Andar 1 (recalibrar o cadastro) é a parte maior da conta.",
+        ),
+        source="Fonte: decision_metric de results/iso_servico e "
+        "results/sensibilidade_dirigida/lt7_rp14.",
+        fmt=f,
+    )  # fmt: skip
+
+    chart_top = r
+    table_top = chart_top + 2 * _VISUAL_CHART_ROWS + 1
+    sheet.write(table_top, 0, "Dados dos gráficos", fmt.bold)
+    for col, header in enumerate(("cenário", "nível de serviço", "capital (índice)")):
+        sheet.write(table_top + 1, col, header, fmt.header)
+    scenarios = (
+        ("ERP desatualizado", stale),
+        ("ERP recalibrado", recal),
+        ("Motor (braço 2)", motor),
+    )
+    for i, (name, arm) in enumerate(scenarios, start=table_top + 2):
+        sheet.write(i, 0, name)
+        sheet.write_number(i, 1, arm.nivel_servico, fmt.pct)
+        sheet.write_number(i, 2, 100.0 * arm.capital_medio_rs / recal.capital_medio_rs, fmt.number)
+    sheet.write(
+        table_top + 5, 0,
+        "Capital: índice 100 = baseline recalibrado. Perda evitada e taxa de aceitação não são "
+        "medidas -- ver aba Limitações.",
+        f["source"],
+    )  # fmt: skip
+    sheet.set_row(table_top + 5, 30)
+
+    first, last = table_top + 2, table_top + 4
+    colors = [_ORANGE, _BLUE, _AQUA]
+    chart_specs = (
+        ("Nível de serviço (%)", 1, 1.0, "0%", chart_top),
+        (
+            "Capital médio empregado (índice, 100 = baseline recalibrado)",
+            2,
+            120,
+            "0",
+            chart_top + _VISUAL_CHART_ROWS,
+        ),
+    )
+    for title, col, axis_max, num_fmt, row in chart_specs:
+        chart = workbook.add_chart({"type": "column"})
+        chart.add_series(
+            {
+                "name": title,
+                "categories": [_VISUAL_SHEET_NAME, first, 0, last, 0],
+                "values": [_VISUAL_SHEET_NAME, first, col, last, col],
+                "points": [{"fill": {"color": c}} for c in colors],
+                "data_labels": {"value": True, "num_format": num_fmt},
+                "gap": 60,
+            }
+        )
+        chart.set_title({"name": title, "name_font": {"size": 10}})
+        chart.set_legend({"none": True})
+        chart.set_y_axis(
+            {
+                "min": 0,
+                "max": axis_max,
+                "num_format": num_fmt,
+                "major_gridlines": {"visible": False},
+            }
+        )
+        chart.set_size(_CHART_SIZE)
+        sheet.insert_chart(row, 0, chart)
+
+
+def write_monthly_report_workbook(out_path: Path) -> Path:
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    workbook = xlsxwriter.Workbook(str(out_path))
+    fmt = _make_formats(workbook)
+
     data = _build_report_data()
+    _write_visual_sheet(workbook, data, fmt)
     _write_resumo_sheet(workbook, data, fmt)
     _write_andar1_sheet(workbook, data, fmt)
     _write_andar2_sheet(workbook, data, fmt)

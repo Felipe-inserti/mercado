@@ -24,6 +24,8 @@ from pathlib import Path
 
 import polars as pl
 import pytest
+import xlsxwriter
+from openpyxl import load_workbook
 
 from motor.experiments import stale_baseline as sb
 from motor.reporting import monthly_report as mr
@@ -245,3 +247,95 @@ def test_ruptura_evitada_andar1_bate_com_numeros_medidos_na_sprint_18() -> None:
     recalibrado = mr.load_recalibrado_financials()
     evitada = mr.ruptura_evitada(stale, recalibrado)
     assert evitada == pytest.approx(2_019_048.41 - 265_066.16, abs=1.0)
+
+
+# --------------------------------------------------------------------------
+# aba "Resumo visual" (Sprint 23)
+# --------------------------------------------------------------------------
+
+
+def _visual_sheet(tmp_path: Path):
+    path = tmp_path / "visual.xlsx"
+    workbook = xlsxwriter.Workbook(str(path))
+    mr._write_visual_sheet(workbook, mr._build_report_data(), mr._make_formats(workbook))
+    workbook.close()
+    return load_workbook(path)["Resumo visual"]
+
+
+def _find(ws, text: str) -> int:
+    for row in ws.iter_rows():
+        if row[0].value is not None and text in str(row[0].value):
+            return row[0].row
+    raise AssertionError(f"texto {text!r} não encontrado na aba")
+
+
+@pytest.mark.usefixtures("cenario")
+def test_visual_tres_blocos_com_numeros_calculados_dos_resultados(tmp_path: Path) -> None:
+    ws = _visual_sheet(tmp_path)
+    stale = mr.load_stale_financials(mr.STALE_LABEL_HEADLINE)
+    recal = mr.load_recalibrado_financials()
+    motor = mr.load_motor_financials()
+
+    servico = str(ws.cell(row=_find(ws, "NÍVEL DE SERVIÇO") + 1, column=1).value)
+    assert "60%" in servico
+    assert "95%" in servico
+
+    capital = ws.cell(row=_find(ws, "CAPITAL PARADO") + 1, column=1).value
+    assert capital == pytest.approx(mr.variacao_relativa_capital(stale, recal))
+    assert capital == pytest.approx(2.84, abs=0.01)  # +284%
+
+    margem = ws.cell(row=_find(ws, "MARGEM POR REAL") + 1, column=1).value
+    assert margem == pytest.approx(motor.decision_metric / recal.decision_metric - 1)
+    assert margem == pytest.approx(0.0288, abs=0.0005)  # +2,9%
+
+
+@pytest.mark.usefixtures("cenario")
+def test_visual_dados_dos_graficos_sao_os_numeros_dos_dois_graficos(tmp_path: Path) -> None:
+    ws = _visual_sheet(tmp_path)
+    top = _find(ws, "Dados dos gráficos")
+    rows = [[c.value for c in ws[r]][:3] for r in range(top + 2, top + 5)]
+    assert [r[0] for r in rows] == ["ERP desatualizado", "ERP recalibrado", "Motor (braço 2)"]
+    assert [round(r[1], 4) for r in rows] == [0.5999, 0.9485, 0.9484]  # serviço, fração
+    assert [round(r[2], 1) for r in rows] == [26.0, 100.0, 97.2]  # capital, 100 = recalibrado
+
+
+@pytest.mark.usefixtures("cenario")
+def test_visual_tem_dois_graficos_pequenos_empilhados(tmp_path: Path) -> None:
+    ws = _visual_sheet(tmp_path)
+    assert len(ws._charts) == 2
+    anchors = [c.anchor._from for c in ws._charts]
+    assert anchors[0].col == anchors[1].col  # empilhados na mesma coluna
+    assert anchors[0].row < anchors[1].row
+
+
+@pytest.mark.usefixtures("cenario")
+def test_visual_declara_celula_origem_e_ilustrativo(tmp_path: Path) -> None:
+    ws = _visual_sheet(tmp_path)
+    texto = " ".join(str(c.value) for row in ws.iter_rows() for c in row if c.value is not None)
+    assert "lead time 7" in texto and "revisão 14" in texto
+    assert "results/baseline_desatualizado" in texto
+    assert "results/iso_servico" in texto
+    assert "ilustrativo" in texto  # R$ das outras abas
+
+
+def test_workbook_abre_na_aba_visual_e_mantem_as_demais_atras(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, cenario: Path
+) -> None:
+    """As abas que leem o canônico real são trocadas por abas vazias de mesmo nome: o que se
+    testa aqui é a ORDEM e a aba ativa, não o conteúdo delas."""
+    for name, sheet_name in (
+        ("_write_sangrando_sheet", "Itens sangrando margem"),
+        ("_write_premissas_sheet", "Premissas"),
+    ):
+        monkeypatch.setattr(
+            mr, name, lambda wb, *_a, _n=sheet_name, **_k: wb.add_worksheet(_n), raising=True
+        )
+    path = mr.write_monthly_report_workbook(tmp_path / "r.xlsx")
+    wb = load_workbook(path)
+    assert wb.sheetnames[:3] == [
+        "Resumo visual",
+        "Resumo executivo",
+        "Andar 1 - Correção de cadastro",
+    ]
+    assert wb.active.title == "Resumo visual"
+    assert cenario.exists()
