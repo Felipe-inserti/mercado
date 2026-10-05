@@ -21,3 +21,9 @@ graphify-out/
 # Claude Code: configuração local (caminhos da máquina) e lock de sessão
 .claude/settings.local.json
 .claude/scheduled_tasks.lock
+
+# Dado de cliente (exportações CSV, NF-e XML) nunca entra no git; só as fixtures FICTÍCIAS
+*.csv
+*.xml
+!tests/fixtures/**/*.csv
+!tests/fixtures/**/*.xml

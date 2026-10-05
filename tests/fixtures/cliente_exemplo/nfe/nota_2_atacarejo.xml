@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<nfeProc xmlns="http://www.portalfiscal.inf.br/nfe" versao="4.00">
+  <NFe>
+    <infNFe Id="NFe35240498765432000102550010000882311000000049" versao="4.00">
+    <ide>
+      <cUF>35</cUF><natOp>VENDA DE MERCADORIA</natOp><mod>55</mod><serie>1</serie>
+      <nNF>88231</nNF><dhEmi>2024-04-15T16:05:00-03:00</dhEmi><tpNF>1</tpNF><finNFe>1</finNFe>
+    </ide>
+    <emit><CNPJ>98765432000102</CNPJ><xNome>ATACADAO BETA ATACAREJO</xNome></emit>
+    <dest><CNPJ>55566677000188</CNPJ><xNome>MERCADO EXEMPLO LTDA</xNome></dest>
+    <det nItem="1">
+      <prod>
+        <cProd>FORN-0014</cProd>
+        <cEAN>7891000000014</cEAN>
+        <xProd>LEITE UHT INTEGRAL 1L</xProd>
+        <NCM>10063021</NCM>
+        <CFOP>5102</CFOP>
+        <uCom>UN</uCom>
+        <qCom>400</qCom>
+        <vUnCom>4.50</vUnCom>
+        <vProd>1800.00</vProd>
+        <cEANTrib>7891000000014</cEANTrib>
+        <uTrib>UN</uTrib>
+        <qTrib>400</qTrib>
+        <vUnTrib>4.50</vUnTrib>
+        <indTot>1</indTot>
+      </prod>
+      <imposto>
+        <ICMS><ICMSSN102><orig>0</orig><CSOSN>102</CSOSN></ICMSSN102></ICMS>
+      </imposto>
+    </det>
+    </infNFe>
+  </NFe>
+  <protNFe versao="4.00"><infProt><cStat>100</cStat></infProt></protNFe>
+</nfeProc>

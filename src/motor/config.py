@@ -514,6 +514,34 @@ class CanonicalParams(ParamsSection):
     anomalies: list[AnomalyPeriodParams]
 
 
+class ClientLoaderParams(ParamsSection):
+    """Premissas do loader de dado de cliente (Sprint 22, `motor.io.loaders_cliente`).
+
+    Nenhum limiar das decisões DC1-DC9 vive no código -- todos aqui, com a
+    origem de cada um em `config/params.yaml`.
+
+    `weekly_budget_rs` é OPCIONAL de propósito (`None`): a escala do
+    `guardrails.weekly_budget_rs` do Favorita não serve para um cliente, e
+    inventar um orçamento seria inventar uma restrição. Sem ele, a restrição
+    de caixa fica DESLIGADA no modo `canonical` -- declarado na aba Notas da
+    lista de compra, não escondido.
+    """
+
+    principal_supplier_window_days: PositiveInt
+    generic_codes: list[str]
+    generic_description_patterns: list[str]
+    generic_revenue_share_warn: Fraction
+    emergency_name_patterns: list[str]
+    emergency_cnae_prefixes: list[str]
+    emergency_warn_max_notes: PositiveInt
+    cost_divergence_tolerance: Fraction
+    idle_days_threshold: PositiveInt
+    default_shelf_life_days: PositiveInt
+    default_perishable_shelf_life_days: PositiveInt
+    simulation_start_after_days: PositiveInt
+    weekly_budget_rs: PositiveFloat | None = None
+
+
 class Params(ParamsSection):
     """Todas as premissas numéricas do projeto, carregadas de `config/params.yaml`."""
 
@@ -534,6 +562,7 @@ class Params(ParamsSection):
     quantile_gbm: QuantileGbmParams
     experiments: ExperimentsParams
     canonical: CanonicalParams
+    client_loader: ClientLoaderParams
 
     @model_validator(mode="after")
     def _alpha_bate_com_a_grade_de_quantis(self) -> Params:

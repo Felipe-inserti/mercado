@@ -563,3 +563,20 @@ canonical:
       start: 2016-04-16 # medido: volume diário nacional sobe de ~650-700k/dia para pico de 1,35M em 2016-04-18
       end: 2016-04-24 # medido: volume diário nacional volta à faixa de base (~680k) em 2016-04-25
       reason: "Terremoto M7.8 no Equador em 16/04/2016; pico de compra de emergência em 49 das 54 lojas"
+
+client_loader:
+  # Sprint 22: motor.io.loaders_cliente (dado de cliente real). Tudo arbitrado ate o
+  # primeiro cliente: sao premissas a confirmar na entrevista, nao medicoes.
+  principal_supplier_window_days: 90 # DC6: janela, ancorada na ultima nota dos dados, para escolher o fornecedor principal do item
+  generic_codes: ["9999"] # DC3: codigos de venda generica ("diversos") -- confirmar com o cliente
+  generic_description_patterns: ["DIVERSOS"] # DC3: descricao (caixa alta) que marca venda generica
+  generic_revenue_share_warn: 0.05 # arbitrado: acima disso o dado nao serve para reposicao (perfil)
+  emergency_name_patterns: ["ATACAREJO", "ATACAD", "CASH"] # DC7: trechos do nome do emitente (caixa alta); `tipo` explicito no arquivo de fornecedores vence
+  emergency_cnae_prefixes: ["4639", "4691"] # DC7: prefixos de CNAE de atacado -- a validar com o cliente; a tag CNAE do emitente e opcional na NF-e
+  emergency_warn_max_notes: 2 # DC7: fornecedor ausente do arquivo da entrevista com ate N notas na janela vira AVISO no perfil (nunca muda a classificacao)
+  cost_divergence_tolerance: 0.10 # arbitrado: custo de cadastro vs ultima nota; abaixo disso nao e achado da auditoria
+  idle_days_threshold: 90 # arbitrado: dias sem venda com saldo positivo para entrar na auditoria
+  default_shelf_life_days: 365 # arbitrado: validade de item sem `validade_dias` no cadastro e nao perecivel
+  default_perishable_shelf_life_days: 7 # arbitrado: conservador; item perecivel sem `validade_dias` entra na auditoria
+  simulation_start_after_days: 84 # arbitrado: 12 semanas de historico antes do 1o dia do simulador (so o modo demo, sem saldo de estoque, roda o simulador)
+  weekly_budget_rs: null # sem orcamento informado a restricao de caixa fica DESLIGADA no modo canonical (declarado na aba Notas)

@@ -207,12 +207,15 @@ def new_item_quantity(
     model_suggested_quantity: float,
     category_median_quantity: float,
     used_global_fallback: bool,
+    position: float = 0.0,
 ) -> GuardrailFlag:
     """Devolve o `GuardrailFlag` de um item novo -- SEMPRE dispara (item
     novo sempre vai para exceções, nunca silenciosamente). Quantidade final
-    é a mediana da categoria, nunca o que o modelo teria sugerido
-    (`model_suggested_quantity` entra só como registro de auditoria em
-    `detail`, nunca na decisão).
+    é a mediana da categoria DESCONTADA a posição (`position` = em mãos + em
+    trânsito): `max(0, mediana - posição)` -- o item novo não pede o que já
+    tem. Nunca é o que o modelo teria sugerido (`model_suggested_quantity`
+    entra só como registro de auditoria em `detail`, nunca na decisão).
+    `position=0` (padrão) é a mediana cheia.
 
     `used_global_fallback`: quando a categoria não tem NENHUM item não-novo
     para calcular a própria mediana (categoria pequena, ou todos os itens
@@ -222,10 +225,17 @@ def new_item_quantity(
     fallback_note = (
         " (categoria sem referência -- mediana global usada)" if used_global_fallback else ""
     )
+    final_quantity = max(0.0, category_median_quantity - position)
+    position_note = (
+        f" menos a posição de {position:.2f} (em mãos + em trânsito), pedido de "
+        f"{final_quantity:.2f}"
+        if position > 0.0
+        else ""
+    )
     detail = (
         f"item novo -- quantidade fixa pela mediana da categoria "
-        f"({category_median_quantity:.2f} unidades{fallback_note}), não pelo modelo "
-        f"(que sugeriria {model_suggested_quantity:.2f} unidades sobre histórico curto "
+        f"({category_median_quantity:.2f} unidades{fallback_note}){position_note}, não pelo "
+        f"modelo (que sugeriria {model_suggested_quantity:.2f} unidades sobre histórico curto "
         "demais para confiar)"
     )
     return GuardrailFlag(
@@ -233,7 +243,7 @@ def new_item_quantity(
         reason=GuardrailReason.ITEM_NOVO,
         detail=detail,
         original_quantity=model_suggested_quantity,
-        adjusted_quantity=category_median_quantity,
+        adjusted_quantity=final_quantity,
     )
 
 

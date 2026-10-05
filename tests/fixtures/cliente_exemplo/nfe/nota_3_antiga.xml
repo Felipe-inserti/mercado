@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<nfeProc xmlns="http://www.portalfiscal.inf.br/nfe" versao="4.00">
+  <NFe>
+    <infNFe Id="NFe35240212345678000101550010000010011000000013" versao="4.00">
+    <ide>
+      <cUF>35</cUF><natOp>VENDA DE MERCADORIA</natOp><mod>55</mod><serie>1</serie>
+      <nNF>1001</nNF><dhEmi>2024-02-05T09:15:00-03:00</dhEmi><tpNF>1</tpNF><finNFe>1</finNFe>
+    </ide>
+    <emit><CNPJ>12345678000101</CNPJ><xNome>DISTRIBUIDORA ALFA LTDA</xNome></emit>
+    <dest><CNPJ>55566677000188</CNPJ><xNome>MERCADO EXEMPLO LTDA</xNome></dest>
+    <det nItem="1">
+      <prod>
+        <cProd>FORN-0011</cProd>
+        <cEAN>7891000000011</cEAN>
+        <xProd>ARROZ TIPO 1 5KG</xProd>
+        <NCM>10063021</NCM>
+        <CFOP>5102</CFOP>
+        <uCom>CX</uCom>
+        <qCom>10</qCom>
+        <vUnCom>108.00</vUnCom>
+        <vProd>1080.00</vProd>
+        <cEANTrib>7891000000011</cEANTrib>
+        <uTrib>UN</uTrib>
+        <qTrib>60</qTrib>
+        <vUnTrib>18.00</vUnTrib>
+        <indTot>1</indTot>
+      </prod>
+      <imposto>
+        <ICMS><ICMSSN102><orig>0</orig><CSOSN>102</CSOSN></ICMSSN102></ICMS>
+      </imposto>
+    </det>
+    <det nItem="2">
+      <prod>
+        <cProd>FORN-0012</cProd>
+        <cEAN>7891000000012</cEAN>
+        <xProd>FEIJAO CARIOCA 1KG</xProd>
+        <NCM>10063021</NCM>
+        <CFOP>5102</CFOP>
+        <uCom>CX</uCom>
+        <qCom>10</qCom>
+        <vUnCom>96.00</vUnCom>
+        <vProd>960.00</vProd>
+        <cEANTrib>7891000000012</cEANTrib>
+        <uTrib>UN</uTrib>
+        <qTrib>120</qTrib>
+        <vUnTrib>8.00</vUnTrib>
+        <indTot>1</indTot>
+      </prod>
+      <imposto>
+        <ICMS><ICMSSN102><orig>0</orig><CSOSN>102</CSOSN></ICMSSN102></ICMS>
+      </imposto>
+    </det>
+    <det nItem="3">
+      <prod>
+        <cProd>FORN-0014</cProd>
+        <cEAN>7891000000014</cEAN>
+        <xProd>LEITE UHT INTEGRAL 1L</xProd>
+        <NCM>10063021</NCM>
+        <CFOP>5102</CFOP>
+        <uCom>CX</uCom>
+        <qCom>20</qCom>
+        <vUnCom>48.00</vUnCom>
+        <vProd>960.00</vProd>
+        <cEANTrib>7891000000014</cEANTrib>
+        <uTrib>UN</uTrib>
+        <qTrib>240</qTrib>
+        <vUnTrib>4.00</vUnTrib>
+        <indTot>1</indTot>
+      </prod>
+      <imposto>
+        <ICMS><ICMSSN102><orig>0</orig><CSOSN>102</CSOSN></ICMSSN102></ICMS>
+      </imposto>
+    </det>
+    </infNFe>
+  </NFe>
+  <protNFe versao="4.00"><infProt><cStat>100</cStat></infProt></protNFe>
+</nfeProc>

@@ -1,0 +1,595 @@
+{
+ "report_counts": {
+  "item_novo": 0,
+  "limite_de_variacao": 0,
+  "restricao_de_caixa": 0,
+  "teto_de_cobertura": 0
+ },
+ "suppliers": {
+  "SUP-BEVERAGES": {
+   "category": "BEVERAGES",
+   "exceptions": [],
+   "main": [
+    {
+     "adjustments": [
+      "arredondado para cima (fardo)"
+     ],
+     "category": "BEVERAGES",
+     "coverage_days_after_order": 22.876014420334993,
+     "in_transit": 0.0,
+     "is_exception": false,
+     "item_id": "200",
+     "margin_pct": 0.25,
+     "on_hand": 199.44720136967794,
+     "quantity_packs": 5.0,
+     "quantity_units": 120.0,
+     "unit_of_sale": "unidade",
+     "value_rs": 720.0
+    },
+    {
+     "adjustments": [
+      "arredondado para cima (fardo)"
+     ],
+     "category": "BEVERAGES",
+     "coverage_days_after_order": 22.838236730093854,
+     "in_transit": 0.0,
+     "is_exception": false,
+     "item_id": "201",
+     "margin_pct": 0.2222222222222222,
+     "on_hand": 207.54571538108752,
+     "quantity_packs": 6.0,
+     "quantity_units": 144.0,
+     "unit_of_sale": "unidade",
+     "value_rs": 1008.0
+    },
+    {
+     "adjustments": [
+      "arredondado para cima (fardo)"
+     ],
+     "category": "BEVERAGES",
+     "coverage_days_after_order": 22.542672414203953,
+     "in_transit": 0.0,
+     "is_exception": false,
+     "item_id": "202",
+     "margin_pct": 0.2,
+     "on_hand": 248.73371306090752,
+     "quantity_packs": 5.0,
+     "quantity_units": 120.0,
+     "unit_of_sale": "unidade",
+     "value_rs": 960.0
+    },
+    {
+     "adjustments": [
+      "arredondado para cima (fardo)"
+     ],
+     "category": "BEVERAGES",
+     "coverage_days_after_order": 22.983034760493364,
+     "in_transit": 0.0,
+     "is_exception": false,
+     "item_id": "203",
+     "margin_pct": 0.18181818181818182,
+     "on_hand": 203.0118468479643,
+     "quantity_packs": 7.0,
+     "quantity_units": 168.0,
+     "unit_of_sale": "unidade",
+     "value_rs": 1512.0
+    }
+   ],
+   "min_order_value": 0.0,
+   "outcome": "pedido_emitido",
+   "xlsx": {
+    "Exceções": [
+     [
+      "código",
+      "categoria",
+      "unidade de venda",
+      "sugestão (unidades)",
+      "sugestão (fardos)",
+      "estoque atual",
+      "em trânsito",
+      "cobertura após pedido (dias)",
+      "valor (R$)",
+      "motivo"
+     ],
+     [
+      "Categoria 'BEVERAGES' tem min_order_value=R$ 0,00 (>=50 itens no canônico completo, ver aba Notas) -- e nenhuma regra de guarda disparou para este fornecedor hoje.",
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null
+     ]
+    ],
+    "Lista principal": [
+     [
+      "código",
+      "categoria",
+      "unidade de venda",
+      "sugestão (unidades)",
+      "sugestão (fardos)",
+      "estoque atual",
+      "em trânsito",
+      "cobertura após pedido (dias)",
+      "valor (R$)"
+     ],
+     [
+      "200",
+      "BEVERAGES",
+      "unidade",
+      120,
+      5,
+      199.4472013696779,
+      0,
+      22.87601442033499,
+      720
+     ],
+     [
+      "201",
+      "BEVERAGES",
+      "unidade",
+      144,
+      6,
+      207.5457153810875,
+      0,
+      22.83823673009385,
+      1008
+     ],
+     [
+      "202",
+      "BEVERAGES",
+      "unidade",
+      120,
+      5,
+      248.7337130609075,
+      0,
+      22.54267241420395,
+      960
+     ],
+     [
+      "203",
+      "BEVERAGES",
+      "unidade",
+      168,
+      7,
+      203.0118468479643,
+      0,
+      22.98303476049336,
+      1512
+     ]
+    ],
+    "Notas": [
+     [
+      "Fornecedor: SUP-BEVERAGES -- data de decisão: 2024-04-18 -- resultado do pedido: pedido emitido."
+     ],
+     [
+      "Política: braço 2 (estatístico + nível-alvo), alpha=0.66 (iso-serviço, Etapa 3.12)."
+     ],
+     [
+      "alpha=0,66 foi calibrado (Etapa 3.12) na célula lead_time=7/review_period=14 -- esta lista roda NESSA célula (suppliers sobrescritos), não no lead_time=3/review_period=7 real do canônico. Usar este alpha numa janela de risco diferente seria uma combinação nova, nunca medida."
+     ],
+     [
+      "Fardo (pack_multiple) e pedido mínimo (min_order_value) desta lista vêm de Params.purchase_list_supplier_assumptions (config/params.yaml), arbitrados por família de categoria -- NÃO do canônico (que tem os dois zerados/unitários, premissa mais simples). Fardo: perecível fresco vendido a peça/peso = 1 (sem fardo real); giro rápido (padaria, laticínios, ovos, congelados, prontos) = 6; mercearia seca/limpeza/higiene = 12; bebidas (pallet fechado) = 24; bazar/não-alimentar = 6. Pedido mínimo: R$ 2.000,00 para fornecedor de categoria com menos de 50 itens no canônico completo (fornecedor pequeno/especializado); R$ 0,00 para os demais."
+     ],
+     [
+      "min_order_value desta categoria (BEVERAGES): R$ 0.00."
+     ],
+     [
+      "Quatro regras de guarda ativas (Sprint 13, implementadas na Etapa 3.16, teto corrigido na 3.16.2, orçamento recalibrado na 3.16.3, piso de categoria na 3.16.4): teto de cobertura = max(validade da família, janela de risco) -- nunca a validade sozinha, ver nota abaixo; limite de variação (2x a média de compras recentes, sinaliza sem cortar); restrição de caixa com piso de 60% por categoria (orçamento do ciclo, corta por margem só acima do piso, nunca proporcionalmente -- ver nota abaixo); item novo (quantidade fixa pela mediana da categoria). Duas regras do desenho original NÃO implementadas: promocao_prevista -- exige calendário promocional (Item.on_promo futuro/planejado); o canônico Favorita só carrega on_promo HISTÓRICO em sales.parquet (o que já aconteceu), nunca o que está planejado -- não dá pra reagir a uma promoção que o dado não anuncia com antecedência. Não implementada. | item_ancora -- exige análise de cesta (quais itens saem juntos, para proteger presença de item de entrada mesmo com margem comprimida) -- fora de escopo da v1 (Item.is_anchor é 100% nulo no canônico, Sprint 3 D7). Não implementada."
+     ],
+     [
+      "A restrição de caixa roda por último, sobre o portfólio inteiro, depois do fardo/mínimo de fornecedor -- ela PODE cortar um item cujo fornecedor já tinha batido o próprio pedido mínimo, o que reabriria 'mínimo inatingível' para esse fornecedor. Esta versão NÃO revalida esse ciclo (um loop de ponto-fixo ficou fora do escopo desta etapa) -- declarado, não escondido."
+     ],
+     [
+      "CORRIGIDO na Etapa 3.16.4: 'margem gerada por real investido' é o critério certo para alocar capital marginal, mas sem piso por categoria ele zerava categorias inteiras de baixa margem quando a regra disparava -- na medição da Etapa 3.16.3 (antes desta correção), 3 categorias inteiras (GROCERY II, MEATS, SEAFOOD) e mais 5 quase inteiras (DAIRY, EGGS, GROCERY I, POULTRY, PRODUCE -- 75-95% dos itens) foram cortadas, todas com margem 14-20%, exatamente os itens perecíveis/de mercearia que trazem o cliente à loja -- itens ÂNCORA por desenho (margem baixa DE PROPÓSITO). Agora nenhuma categoria cai abaixo de 60% do seu próprio valor originalmente sugerido, qualquer que seja a margem -- ver Params.guardrails.cash_constraint_category_floor_fraction (arbitrado, critério: preserva presença de gôndola cortando fundo o suficiente pra regra ainda ter efeito real). Quando a soma dos pisos sozinha excede o orçamento, a guarda não tenta salvar todas as categorias -- corta por margem média sobre os PRÓPRIOS pisos e emite um alerta separado (informação de negócio: o orçamento não cobre nem o mínimo operacional)."
+     ],
+     [
+      "O teto de cobertura só é uma guarda ATIVA quando a janela de risco (lead_time + review_period) é menor que a validade da família -- quando a janela é MAIOR (caso de perecível fresco/giro rápido nesta célula, ver Etapa 3.16.2), o teto efetivo vira a própria janela, e a guarda para de proteger contra excesso: ela só evita que o pedido peça MENOS que o mínimo estrutural, não pode evitar pedir mais que a validade permite. Em famílias assim, a proteção real teria que vir de um review_period MENOR, por fornecedor -- que o simulador hoje não suporta (é global para toda a simulação, motor.experiments.shared). Isto é DÉBITO DE ARQUITETURA, não bug: medir com uma janela de risco única penaliza estruturalmente a família onde o motor mais teria a ganhar (perecível, giro rápido)."
+     ],
+     [
+      "Premissas de fornecedor (Etapa 3.15) e regras de guarda (Etapa 3.16) valem SÓ para esta lista de compra. A comparação iso-serviço da Etapa 3.12 (results/iso_servico/) foi medida sem nenhuma das duas e NÃO foi recalculada -- os dois cenários NÃO são comparáveis linha a linha. As guardas mudam a política (cortam/substituem quantidade); rodadas sobre o período inteiro, mudariam decision_metric -- medir esse efeito é experimento próprio, declarado, não feito aqui."
+     ],
+     [
+      "Item.description e Item.ean são 100% nulos no dataset Favorita (Sprint 3, D7, CLAUDE.md) -- não há nome de produto no dado público. Esta lista usa apenas item_id (código) e category (33 categorias) para identificar o item; nenhuma descrição foi inventada."
+     ],
+     [
+      "\"Sugestão (fardos)\" = \"sugestão (unidades)\" / pack_multiple (fardo real por família de categoria, Etapa 3.15 -- ver nota acima)."
+     ]
+    ]
+   }
+  },
+  "SUP-CLEANING": {
+   "category": "CLEANING",
+   "exceptions": [],
+   "main": [
+    {
+     "adjustments": [
+      "arredondado para cima (fardo)"
+     ],
+     "category": "CLEANING",
+     "coverage_days_after_order": 21.960716888440757,
+     "in_transit": 0.0,
+     "is_exception": false,
+     "item_id": "300",
+     "margin_pct": 0.25,
+     "on_hand": 212.07733811971804,
+     "quantity_packs": 12.0,
+     "quantity_units": 144.0,
+     "unit_of_sale": "unidade",
+     "value_rs": 864.0
+    },
+    {
+     "adjustments": [
+      "arredondado para cima (fardo)"
+     ],
+     "category": "CLEANING",
+     "coverage_days_after_order": 21.310056704198807,
+     "in_transit": 0.0,
+     "is_exception": false,
+     "item_id": "301",
+     "margin_pct": 0.2222222222222222,
+     "on_hand": 218.09378871183753,
+     "quantity_packs": 11.0,
+     "quantity_units": 132.0,
+     "unit_of_sale": "unidade",
+     "value_rs": 924.0
+    },
+    {
+     "adjustments": [
+      "arredondado para cima (fardo)"
+     ],
+     "category": "CLEANING",
+     "coverage_days_after_order": 21.74273132840984,
+     "in_transit": 0.0,
+     "is_exception": false,
+     "item_id": "302",
+     "margin_pct": 0.2,
+     "on_hand": 202.402958701839,
+     "quantity_packs": 14.0,
+     "quantity_units": 168.0,
+     "unit_of_sale": "unidade",
+     "value_rs": 1344.0
+    },
+    {
+     "adjustments": [
+      "arredondado para cima (fardo)"
+     ],
+     "category": "CLEANING",
+     "coverage_days_after_order": 23.100641043314123,
+     "in_transit": 0.0,
+     "is_exception": false,
+     "item_id": "303",
+     "margin_pct": 0.18181818181818182,
+     "on_hand": 271.3618593013113,
+     "quantity_packs": 13.0,
+     "quantity_units": 156.0,
+     "unit_of_sale": "unidade",
+     "value_rs": 1404.0
+    }
+   ],
+   "min_order_value": 0.0,
+   "outcome": "pedido_emitido",
+   "xlsx": {
+    "Exceções": [
+     [
+      "código",
+      "categoria",
+      "unidade de venda",
+      "sugestão (unidades)",
+      "sugestão (fardos)",
+      "estoque atual",
+      "em trânsito",
+      "cobertura após pedido (dias)",
+      "valor (R$)",
+      "motivo"
+     ],
+     [
+      "Categoria 'CLEANING' tem min_order_value=R$ 0,00 (>=50 itens no canônico completo, ver aba Notas) -- e nenhuma regra de guarda disparou para este fornecedor hoje.",
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null
+     ]
+    ],
+    "Lista principal": [
+     [
+      "código",
+      "categoria",
+      "unidade de venda",
+      "sugestão (unidades)",
+      "sugestão (fardos)",
+      "estoque atual",
+      "em trânsito",
+      "cobertura após pedido (dias)",
+      "valor (R$)"
+     ],
+     [
+      "300",
+      "CLEANING",
+      "unidade",
+      144,
+      12,
+      212.077338119718,
+      0,
+      21.96071688844076,
+      864
+     ],
+     [
+      "301",
+      "CLEANING",
+      "unidade",
+      132,
+      11,
+      218.0937887118375,
+      0,
+      21.31005670419881,
+      924
+     ],
+     [
+      "302",
+      "CLEANING",
+      "unidade",
+      168,
+      14,
+      202.402958701839,
+      0,
+      21.74273132840984,
+      1344
+     ],
+     [
+      "303",
+      "CLEANING",
+      "unidade",
+      156,
+      13,
+      271.3618593013113,
+      0,
+      23.10064104331412,
+      1404
+     ]
+    ],
+    "Notas": [
+     [
+      "Fornecedor: SUP-CLEANING -- data de decisão: 2024-04-18 -- resultado do pedido: pedido emitido."
+     ],
+     [
+      "Política: braço 2 (estatístico + nível-alvo), alpha=0.66 (iso-serviço, Etapa 3.12)."
+     ],
+     [
+      "alpha=0,66 foi calibrado (Etapa 3.12) na célula lead_time=7/review_period=14 -- esta lista roda NESSA célula (suppliers sobrescritos), não no lead_time=3/review_period=7 real do canônico. Usar este alpha numa janela de risco diferente seria uma combinação nova, nunca medida."
+     ],
+     [
+      "Fardo (pack_multiple) e pedido mínimo (min_order_value) desta lista vêm de Params.purchase_list_supplier_assumptions (config/params.yaml), arbitrados por família de categoria -- NÃO do canônico (que tem os dois zerados/unitários, premissa mais simples). Fardo: perecível fresco vendido a peça/peso = 1 (sem fardo real); giro rápido (padaria, laticínios, ovos, congelados, prontos) = 6; mercearia seca/limpeza/higiene = 12; bebidas (pallet fechado) = 24; bazar/não-alimentar = 6. Pedido mínimo: R$ 2.000,00 para fornecedor de categoria com menos de 50 itens no canônico completo (fornecedor pequeno/especializado); R$ 0,00 para os demais."
+     ],
+     [
+      "min_order_value desta categoria (CLEANING): R$ 0.00."
+     ],
+     [
+      "Quatro regras de guarda ativas (Sprint 13, implementadas na Etapa 3.16, teto corrigido na 3.16.2, orçamento recalibrado na 3.16.3, piso de categoria na 3.16.4): teto de cobertura = max(validade da família, janela de risco) -- nunca a validade sozinha, ver nota abaixo; limite de variação (2x a média de compras recentes, sinaliza sem cortar); restrição de caixa com piso de 60% por categoria (orçamento do ciclo, corta por margem só acima do piso, nunca proporcionalmente -- ver nota abaixo); item novo (quantidade fixa pela mediana da categoria). Duas regras do desenho original NÃO implementadas: promocao_prevista -- exige calendário promocional (Item.on_promo futuro/planejado); o canônico Favorita só carrega on_promo HISTÓRICO em sales.parquet (o que já aconteceu), nunca o que está planejado -- não dá pra reagir a uma promoção que o dado não anuncia com antecedência. Não implementada. | item_ancora -- exige análise de cesta (quais itens saem juntos, para proteger presença de item de entrada mesmo com margem comprimida) -- fora de escopo da v1 (Item.is_anchor é 100% nulo no canônico, Sprint 3 D7). Não implementada."
+     ],
+     [
+      "A restrição de caixa roda por último, sobre o portfólio inteiro, depois do fardo/mínimo de fornecedor -- ela PODE cortar um item cujo fornecedor já tinha batido o próprio pedido mínimo, o que reabriria 'mínimo inatingível' para esse fornecedor. Esta versão NÃO revalida esse ciclo (um loop de ponto-fixo ficou fora do escopo desta etapa) -- declarado, não escondido."
+     ],
+     [
+      "CORRIGIDO na Etapa 3.16.4: 'margem gerada por real investido' é o critério certo para alocar capital marginal, mas sem piso por categoria ele zerava categorias inteiras de baixa margem quando a regra disparava -- na medição da Etapa 3.16.3 (antes desta correção), 3 categorias inteiras (GROCERY II, MEATS, SEAFOOD) e mais 5 quase inteiras (DAIRY, EGGS, GROCERY I, POULTRY, PRODUCE -- 75-95% dos itens) foram cortadas, todas com margem 14-20%, exatamente os itens perecíveis/de mercearia que trazem o cliente à loja -- itens ÂNCORA por desenho (margem baixa DE PROPÓSITO). Agora nenhuma categoria cai abaixo de 60% do seu próprio valor originalmente sugerido, qualquer que seja a margem -- ver Params.guardrails.cash_constraint_category_floor_fraction (arbitrado, critério: preserva presença de gôndola cortando fundo o suficiente pra regra ainda ter efeito real). Quando a soma dos pisos sozinha excede o orçamento, a guarda não tenta salvar todas as categorias -- corta por margem média sobre os PRÓPRIOS pisos e emite um alerta separado (informação de negócio: o orçamento não cobre nem o mínimo operacional)."
+     ],
+     [
+      "O teto de cobertura só é uma guarda ATIVA quando a janela de risco (lead_time + review_period) é menor que a validade da família -- quando a janela é MAIOR (caso de perecível fresco/giro rápido nesta célula, ver Etapa 3.16.2), o teto efetivo vira a própria janela, e a guarda para de proteger contra excesso: ela só evita que o pedido peça MENOS que o mínimo estrutural, não pode evitar pedir mais que a validade permite. Em famílias assim, a proteção real teria que vir de um review_period MENOR, por fornecedor -- que o simulador hoje não suporta (é global para toda a simulação, motor.experiments.shared). Isto é DÉBITO DE ARQUITETURA, não bug: medir com uma janela de risco única penaliza estruturalmente a família onde o motor mais teria a ganhar (perecível, giro rápido)."
+     ],
+     [
+      "Premissas de fornecedor (Etapa 3.15) e regras de guarda (Etapa 3.16) valem SÓ para esta lista de compra. A comparação iso-serviço da Etapa 3.12 (results/iso_servico/) foi medida sem nenhuma das duas e NÃO foi recalculada -- os dois cenários NÃO são comparáveis linha a linha. As guardas mudam a política (cortam/substituem quantidade); rodadas sobre o período inteiro, mudariam decision_metric -- medir esse efeito é experimento próprio, declarado, não feito aqui."
+     ],
+     [
+      "Item.description e Item.ean são 100% nulos no dataset Favorita (Sprint 3, D7, CLAUDE.md) -- não há nome de produto no dado público. Esta lista usa apenas item_id (código) e category (33 categorias) para identificar o item; nenhuma descrição foi inventada."
+     ],
+     [
+      "\"Sugestão (fardos)\" = \"sugestão (unidades)\" / pack_multiple (fardo real por família de categoria, Etapa 3.15 -- ver nota acima)."
+     ]
+    ]
+   }
+  },
+  "SUP-GROCERY_I": {
+   "category": "GROCERY I",
+   "exceptions": [],
+   "main": [
+    {
+     "adjustments": [
+      "arredondado para cima (fardo)"
+     ],
+     "category": "GROCERY I",
+     "coverage_days_after_order": 23.32428377620709,
+     "in_transit": 0.0,
+     "is_exception": false,
+     "item_id": "100",
+     "margin_pct": 0.25,
+     "on_hand": 236.8661958339191,
+     "quantity_packs": 9.0,
+     "quantity_units": 108.0,
+     "unit_of_sale": "unidade",
+     "value_rs": 648.0
+    },
+    {
+     "adjustments": [
+      "arredondado para cima (fardo)"
+     ],
+     "category": "GROCERY I",
+     "coverage_days_after_order": 23.87152143025954,
+     "in_transit": 0.0,
+     "is_exception": false,
+     "item_id": "101",
+     "margin_pct": 0.2222222222222222,
+     "on_hand": 220.95749543312326,
+     "quantity_packs": 11.0,
+     "quantity_units": 132.0,
+     "unit_of_sale": "unidade",
+     "value_rs": 924.0
+    },
+    {
+     "adjustments": [
+      "arredondado para cima (fardo)"
+     ],
+     "category": "GROCERY I",
+     "coverage_days_after_order": 21.19063502281595,
+     "in_transit": 0.0,
+     "is_exception": false,
+     "item_id": "102",
+     "margin_pct": 0.2,
+     "on_hand": 191.91399249161526,
+     "quantity_packs": 11.0,
+     "quantity_units": 132.0,
+     "unit_of_sale": "unidade",
+     "value_rs": 1056.0
+    },
+    {
+     "adjustments": [
+      "arredondado para cima (fardo)"
+     ],
+     "category": "GROCERY I",
+     "coverage_days_after_order": 21.7861094255119,
+     "in_transit": 0.0,
+     "is_exception": false,
+     "item_id": "103",
+     "margin_pct": 0.18181818181818182,
+     "on_hand": 143.55900460078863,
+     "quantity_packs": 13.0,
+     "quantity_units": 156.0,
+     "unit_of_sale": "unidade",
+     "value_rs": 1404.0
+    }
+   ],
+   "min_order_value": 0.0,
+   "outcome": "pedido_emitido",
+   "xlsx": {
+    "Exceções": [
+     [
+      "código",
+      "categoria",
+      "unidade de venda",
+      "sugestão (unidades)",
+      "sugestão (fardos)",
+      "estoque atual",
+      "em trânsito",
+      "cobertura após pedido (dias)",
+      "valor (R$)",
+      "motivo"
+     ],
+     [
+      "Categoria 'GROCERY I' tem min_order_value=R$ 0,00 (>=50 itens no canônico completo, ver aba Notas) -- e nenhuma regra de guarda disparou para este fornecedor hoje.",
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null
+     ]
+    ],
+    "Lista principal": [
+     [
+      "código",
+      "categoria",
+      "unidade de venda",
+      "sugestão (unidades)",
+      "sugestão (fardos)",
+      "estoque atual",
+      "em trânsito",
+      "cobertura após pedido (dias)",
+      "valor (R$)"
+     ],
+     [
+      "100",
+      "GROCERY I",
+      "unidade",
+      108,
+      9,
+      236.8661958339191,
+      0,
+      23.32428377620709,
+      648
+     ],
+     [
+      "101",
+      "GROCERY I",
+      "unidade",
+      132,
+      11,
+      220.9574954331233,
+      0,
+      23.87152143025954,
+      924
+     ],
+     [
+      "102",
+      "GROCERY I",
+      "unidade",
+      132,
+      11,
+      191.9139924916153,
+      0,
+      21.19063502281595,
+      1056
+     ],
+     [
+      "103",
+      "GROCERY I",
+      "unidade",
+      156,
+      13,
+      143.5590046007886,
+      0,
+      21.7861094255119,
+      1404
+     ]
+    ],
+    "Notas": [
+     [
+      "Fornecedor: SUP-GROCERY_I -- data de decisão: 2024-04-18 -- resultado do pedido: pedido emitido."
+     ],
+     [
+      "Política: braço 2 (estatístico + nível-alvo), alpha=0.66 (iso-serviço, Etapa 3.12)."
+     ],
+     [
+      "alpha=0,66 foi calibrado (Etapa 3.12) na célula lead_time=7/review_period=14 -- esta lista roda NESSA célula (suppliers sobrescritos), não no lead_time=3/review_period=7 real do canônico. Usar este alpha numa janela de risco diferente seria uma combinação nova, nunca medida."
+     ],
+     [
+      "Fardo (pack_multiple) e pedido mínimo (min_order_value) desta lista vêm de Params.purchase_list_supplier_assumptions (config/params.yaml), arbitrados por família de categoria -- NÃO do canônico (que tem os dois zerados/unitários, premissa mais simples). Fardo: perecível fresco vendido a peça/peso = 1 (sem fardo real); giro rápido (padaria, laticínios, ovos, congelados, prontos) = 6; mercearia seca/limpeza/higiene = 12; bebidas (pallet fechado) = 24; bazar/não-alimentar = 6. Pedido mínimo: R$ 2.000,00 para fornecedor de categoria com menos de 50 itens no canônico completo (fornecedor pequeno/especializado); R$ 0,00 para os demais."
+     ],
+     [
+      "min_order_value desta categoria (GROCERY I): R$ 0.00."
+     ],
+     [
+      "Quatro regras de guarda ativas (Sprint 13, implementadas na Etapa 3.16, teto corrigido na 3.16.2, orçamento recalibrado na 3.16.3, piso de categoria na 3.16.4): teto de cobertura = max(validade da família, janela de risco) -- nunca a validade sozinha, ver nota abaixo; limite de variação (2x a média de compras recentes, sinaliza sem cortar); restrição de caixa com piso de 60% por categoria (orçamento do ciclo, corta por margem só acima do piso, nunca proporcionalmente -- ver nota abaixo); item novo (quantidade fixa pela mediana da categoria). Duas regras do desenho original NÃO implementadas: promocao_prevista -- exige calendário promocional (Item.on_promo futuro/planejado); o canônico Favorita só carrega on_promo HISTÓRICO em sales.parquet (o que já aconteceu), nunca o que está planejado -- não dá pra reagir a uma promoção que o dado não anuncia com antecedência. Não implementada. | item_ancora -- exige análise de cesta (quais itens saem juntos, para proteger presença de item de entrada mesmo com margem comprimida) -- fora de escopo da v1 (Item.is_anchor é 100% nulo no canônico, Sprint 3 D7). Não implementada."
+     ],
+     [
+      "A restrição de caixa roda por último, sobre o portfólio inteiro, depois do fardo/mínimo de fornecedor -- ela PODE cortar um item cujo fornecedor já tinha batido o próprio pedido mínimo, o que reabriria 'mínimo inatingível' para esse fornecedor. Esta versão NÃO revalida esse ciclo (um loop de ponto-fixo ficou fora do escopo desta etapa) -- declarado, não escondido."
+     ],
+     [
+      "CORRIGIDO na Etapa 3.16.4: 'margem gerada por real investido' é o critério certo para alocar capital marginal, mas sem piso por categoria ele zerava categorias inteiras de baixa margem quando a regra disparava -- na medição da Etapa 3.16.3 (antes desta correção), 3 categorias inteiras (GROCERY II, MEATS, SEAFOOD) e mais 5 quase inteiras (DAIRY, EGGS, GROCERY I, POULTRY, PRODUCE -- 75-95% dos itens) foram cortadas, todas com margem 14-20%, exatamente os itens perecíveis/de mercearia que trazem o cliente à loja -- itens ÂNCORA por desenho (margem baixa DE PROPÓSITO). Agora nenhuma categoria cai abaixo de 60% do seu próprio valor originalmente sugerido, qualquer que seja a margem -- ver Params.guardrails.cash_constraint_category_floor_fraction (arbitrado, critério: preserva presença de gôndola cortando fundo o suficiente pra regra ainda ter efeito real). Quando a soma dos pisos sozinha excede o orçamento, a guarda não tenta salvar todas as categorias -- corta por margem média sobre os PRÓPRIOS pisos e emite um alerta separado (informação de negócio: o orçamento não cobre nem o mínimo operacional)."
+     ],
+     [
+      "O teto de cobertura só é uma guarda ATIVA quando a janela de risco (lead_time + review_period) é menor que a validade da família -- quando a janela é MAIOR (caso de perecível fresco/giro rápido nesta célula, ver Etapa 3.16.2), o teto efetivo vira a própria janela, e a guarda para de proteger contra excesso: ela só evita que o pedido peça MENOS que o mínimo estrutural, não pode evitar pedir mais que a validade permite. Em famílias assim, a proteção real teria que vir de um review_period MENOR, por fornecedor -- que o simulador hoje não suporta (é global para toda a simulação, motor.experiments.shared). Isto é DÉBITO DE ARQUITETURA, não bug: medir com uma janela de risco única penaliza estruturalmente a família onde o motor mais teria a ganhar (perecível, giro rápido)."
+     ],
+     [
+      "Premissas de fornecedor (Etapa 3.15) e regras de guarda (Etapa 3.16) valem SÓ para esta lista de compra. A comparação iso-serviço da Etapa 3.12 (results/iso_servico/) foi medida sem nenhuma das duas e NÃO foi recalculada -- os dois cenários NÃO são comparáveis linha a linha. As guardas mudam a política (cortam/substituem quantidade); rodadas sobre o período inteiro, mudariam decision_metric -- medir esse efeito é experimento próprio, declarado, não feito aqui."
+     ],
+     [
+      "Item.description e Item.ean são 100% nulos no dataset Favorita (Sprint 3, D7, CLAUDE.md) -- não há nome de produto no dado público. Esta lista usa apenas item_id (código) e category (33 categorias) para identificar o item; nenhuma descrição foi inventada."
+     ],
+     [
+      "\"Sugestão (fardos)\" = \"sugestão (unidades)\" / pack_multiple (fardo real por família de categoria, Etapa 3.15 -- ver nota acima)."
+     ]
+    ]
+   }
+  }
+ }
+}

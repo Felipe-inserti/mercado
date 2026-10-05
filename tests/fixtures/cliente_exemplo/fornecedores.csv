@@ -1,0 +1,5 @@
+fornecedor_id;nome;tipo;lead_time_dias;dias_pedido;revisao_dias;pedido_minimo_rs;pedido_minimo_un;fardo_padrao
+12345678000101;DISTRIBUIDORA ALFA LTDA;regular;3;1|4;4;500,00;0;10
+98765432000102;ATACADAO BETA ATACAREJO;;1;1|2|3|4|5|6;2;0;0;
+11122233000103;ATACADO DO ZE COMERCIO;regular;5;3;7;0;0;
+33344455000104;DISTRIBUIDORA GAMA LTDA;regular;7;2;7;0;0;

@@ -1,0 +1,121 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<nfeProc xmlns="http://www.portalfiscal.inf.br/nfe" versao="4.00">
+  <NFe>
+    <infNFe Id="NFe35240412345678000101550010000010421000000028" versao="4.00">
+    <ide>
+      <cUF>35</cUF><natOp>VENDA DE MERCADORIA</natOp><mod>55</mod><serie>1</serie>
+      <nNF>1042</nNF><dhEmi>2024-04-08T10:40:00-03:00</dhEmi><tpNF>1</tpNF><finNFe>1</finNFe>
+    </ide>
+    <emit><CNPJ>12345678000101</CNPJ><xNome>DISTRIBUIDORA ALFA LTDA</xNome></emit>
+    <dest><CNPJ>55566677000188</CNPJ><xNome>MERCADO EXEMPLO LTDA</xNome></dest>
+    <det nItem="1">
+      <prod>
+        <cProd>FORN-0011</cProd>
+        <cEAN>7891000000011</cEAN>
+        <xProd>ARROZ TIPO 1 5KG</xProd>
+        <NCM>10063021</NCM>
+        <CFOP>5102</CFOP>
+        <uCom>CX</uCom>
+        <qCom>5</qCom>
+        <vUnCom>108.00</vUnCom>
+        <vProd>540.00</vProd>
+        <cEANTrib>7891000000011</cEANTrib>
+        <uTrib>UN</uTrib>
+        <qTrib>30</qTrib>
+        <vUnTrib>18.00</vUnTrib>
+        <indTot>1</indTot>
+      </prod>
+      <imposto>
+        <ICMS><ICMSSN102><orig>0</orig><CSOSN>102</CSOSN></ICMSSN102></ICMS>
+      </imposto>
+    </det>
+    <det nItem="2">
+      <prod>
+        <cProd>FORN-0012</cProd>
+        <cEAN>7891000000012</cEAN>
+        <xProd>FEIJAO CARIOCA 1KG</xProd>
+        <NCM>10063021</NCM>
+        <CFOP>5102</CFOP>
+        <uCom>CX</uCom>
+        <qCom>10</qCom>
+        <vUnCom>120.00</vUnCom>
+        <vProd>1200.00</vProd>
+        <cEANTrib>7891000000012</cEANTrib>
+        <uTrib>UN</uTrib>
+        <qTrib>120</qTrib>
+        <vUnTrib>10.00</vUnTrib>
+        <vDesc>60.00</vDesc>
+        <indTot>1</indTot>
+      </prod>
+      <imposto>
+        <ICMS><ICMS10><orig>0</orig><CST>10</CST><modBCST>4</modBCST><vBCST>1000.00</vBCST><pICMSST>18.00</pICMSST><vICMSST>36.00</vICMSST></ICMS10></ICMS>
+      </imposto>
+    </det>
+    <det nItem="3">
+      <prod>
+        <cProd>FORN-0013</cProd>
+        <cEAN>7891000000013</cEAN>
+        <xProd>REFRIGERANTE COLA 2L</xProd>
+        <NCM>10063021</NCM>
+        <CFOP>5102</CFOP>
+        <uCom>CX</uCom>
+        <qCom>6</qCom>
+        <vUnCom>31.20</vUnCom>
+        <vProd>187.20</vProd>
+        <cEANTrib>7891000000013</cEANTrib>
+        <uTrib>UN</uTrib>
+        <qTrib>36</qTrib>
+        <vUnTrib>5.20</vUnTrib>
+        <indTot>1</indTot>
+      </prod>
+      <imposto>
+        <ICMS><ICMSSN102><orig>0</orig><CSOSN>102</CSOSN></ICMSSN102></ICMS>
+      </imposto>
+    </det>
+    <det nItem="4">
+      <prod>
+        <cProd>FORN-0015</cProd>
+        <cEAN>7891000000015</cEAN>
+        <xProd>DETERGENTE LIQUIDO 500ML</xProd>
+        <NCM>10063021</NCM>
+        <CFOP>5102</CFOP>
+        <uCom>UN</uCom>
+        <qCom>240</qCom>
+        <vUnCom>2.10</vUnCom>
+        <vProd>504.00</vProd>
+        <cEANTrib>7891000000015</cEANTrib>
+        <uTrib>UN</uTrib>
+        <qTrib>240</qTrib>
+        <vUnTrib>2.10</vUnTrib>
+        <indTot>1</indTot>
+      </prod>
+      <imposto>
+        <ICMS><ICMSSN102><orig>0</orig><CSOSN>102</CSOSN></ICMSSN102></ICMS>
+      </imposto>
+    </det>
+    <det nItem="5">
+      <prod>
+        <cProd>FORN-0016</cProd>
+        <cEAN>7891000000016</cEAN>
+        <xProd>ESPONJA MULTIUSO</xProd>
+        <NCM>10063021</NCM>
+        <CFOP>5102</CFOP>
+        <uCom>UN</uCom>
+        <qCom>100</qCom>
+        <vUnCom>1.20</vUnCom>
+        <vProd>120.00</vProd>
+        <cEANTrib>7891000000016</cEANTrib>
+        <uTrib>UN</uTrib>
+        <qTrib>100</qTrib>
+        <vUnTrib>1.20</vUnTrib>
+        <indTot>1</indTot>
+      </prod>
+      <imposto>
+        <ICMS><ICMSSN102><orig>0</orig><CSOSN>102</CSOSN></ICMSSN102></ICMS>
+      <IPI><cEnq>999</cEnq><IPITrib><CST>00</CST><vIPI>5.00</vIPI></IPITrib></IPI>
+      </imposto>
+    </det>
+    </infNFe>
+  </NFe>
+  <protNFe versao="4.00"><infProt><cStat>100</cStat></infProt></protNFe>
+</nfeProc>

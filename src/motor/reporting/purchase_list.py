@@ -91,8 +91,9 @@ from __future__ import annotations
 import argparse
 import statistics
 from collections import Counter
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from datetime import date, timedelta
+from enum import StrEnum
 from pathlib import Path
 from typing import Any, Final
 
@@ -243,6 +244,84 @@ ALPHA_CELL_MISMATCH_NOTE: Final[str] = (
 )
 
 
+IN_TRANSIT_UNKNOWN_REASON: Final[str] = "pedido anterior pode estar em trânsito"
+"""Motivo de exceção (modo canonical, sem `pedidos_em_aberto.csv`): fornecedor com
+lead_time >= review_period tem, a cada decisão, pedido do ciclo anterior ainda a
+caminho -- e sem o arquivo o `in_transit` é 0, o que faria a política pedir de novo
+o que já foi pedido (o bug clássico, CLAUDE.md seção 5)."""
+
+NO_STOCK_ROW_REASON: Final[str] = (
+    "saldo de estoque não informado para este item -- pedido calculado com saldo 0"
+)
+
+DEMO_BANNER: Final[str] = "ESTOQUE SIMULADO, NÃO USAR PARA PEDIDO REAL"
+DEMO_STOCK_NOTE: Final[str] = (
+    "Estoque simulado: o cliente não enviou saldo de estoque (tabela stock vazia), então a "
+    "posição de cada item (em mãos e em trânsito) foi INVENTADA pelo simulador, rodando a "
+    "política sobre o histórico de vendas. Esta lista demonstra a política -- NÃO é um pedido "
+    "real e não deve ser enviada a fornecedor."
+)
+NO_OPEN_ORDERS_NOTE: Final[str] = (
+    "Pedidos em aberto: o arquivo pedidos_em_aberto.csv NÃO foi informado -- 'em trânsito' = 0 "
+    "para todos os itens. Pedido já feito e ainda não recebido NÃO está descontado desta "
+    "lista. Fornecedor com lead time >= período de revisão tem todos os itens em Exceções "
+    "('pedido anterior pode estar em trânsito')."
+)
+NO_PURCHASE_HISTORY_NOTE: Final[str] = (
+    "Limite de variação desligado: sem histórico de compras (notas fiscais de entrada) não há "
+    "média de compras recentes contra a qual comparar a sugestão."
+)
+CASH_OFF_NOTE: Final[str] = (
+    "Restrição de caixa desligada: client_loader.weekly_budget_rs não foi informado em "
+    "config/params.yaml -- nenhum orçamento foi inventado, então nada foi cortado por caixa."
+)
+
+
+class SupplierTerms(StrEnum):
+    """De onde a lista lê fardo, pedido mínimo, lead time e revisão do fornecedor."""
+
+    ASSUMED_CELL = "assumed_cell"
+    """Favorita (comportamento histórico): fardo e pedido mínimo por categoria de
+    `Params.purchase_list_supplier_assumptions`, e fornecedores sobrescritos para a célula
+    lead_time=7/review_period=14 na qual o alpha foi calibrado."""
+    CANONICAL = "canonical"
+    """Cliente: tudo vem das tabelas canônicas (`Item.pack_multiple`,
+    `Supplier.min_order_value/lead_time_days/review_period_days`), saldo da tabela
+    `stock` e pedidos em aberto do arquivo do cliente."""
+
+
+@dataclass(frozen=True)
+class CanonicalInputs:
+    """Insumos do modo `canonical` que não cabem nas quatro tabelas canônicas.
+
+    `open_orders`: `item_id, supplier_id, quantity, expected_date`; `None` = o arquivo não
+    existe (não se sabe o que está a caminho), diferente de vazio (sabe-se que nada está).
+    `purchases`: `item_id, date, units` -- compras reais (notas) para a média do limite de
+    variação; `None` = sem histórico, e o limite fica desligado."""
+
+    purchases: pl.DataFrame | None
+    open_orders: pl.DataFrame | None
+
+
+@dataclass(frozen=True)
+class ListProvenance:
+    """De onde veio cada insumo da lista -- vira banner e aba Notas, nunca fica implícito."""
+
+    supplier_terms: SupplierTerms
+    simulated_stock: bool
+    stock_date: date | None
+    in_transit_source: str  # "simulado" | "pedidos_em_aberto" | "zero_sem_arquivo"
+    purchases_source: str  # "simulado" | "notas" | "ausente"
+    cash_constraint_active: bool
+
+
+@dataclass(frozen=True)
+class _RealPosition:
+    on_hand: float
+    in_transit: float
+    recent_average_purchase: float
+
+
 @dataclass(frozen=True)
 class PurchaseListRow:
     """Uma linha da lista de compra de um fornecedor."""
@@ -259,6 +338,7 @@ class PurchaseListRow:
     margin_pct: float
     adjustments: tuple[str, ...]
     is_exception: bool
+    description: str | None = None
 
 
 @dataclass(frozen=True)
@@ -271,6 +351,9 @@ class SupplierPurchaseList:
     min_order_value: float
     main: tuple[PurchaseListRow, ...]
     exceptions: tuple[PurchaseListRow, ...]
+    lead_time_days: int | None = None
+    review_period_days: int | None = None
+    provenance: ListProvenance | None = None
 
 
 @dataclass(frozen=True)
@@ -357,6 +440,29 @@ def _first_sale_and_days_with_sales(demand: pl.DataFrame, as_of: date) -> tuple[
     return first_sale, sold_days.height
 
 
+def _last_sale_date(demand: pl.DataFrame, as_of: date) -> date | None:
+    """Data da última venda > 0 ANTES de `as_of`, ou `None` sem nenhuma venda."""
+    last = demand.filter((pl.col("date") < as_of) & (pl.col("units_sold") > 0.0))["date"].max()
+    assert last is None or isinstance(last, date)
+    return last
+
+
+def _classify_idle_items(
+    decisions: _ItemDecisions, *, as_of: date, idle_days_threshold: int
+) -> dict[str, int]:
+    """Item COM histórico mas sem venda há mais de `idle_days_threshold` dias (o mesmo N
+    da auditoria de cadastro) -> `{item_id: dias sem venda}`. Item sem NENHUMA venda não é
+    parado, é novo (`is_new_item`). Só o modo canonical usa isto."""
+    idle: dict[str, int] = {}
+    for item_id, last_sale in decisions.last_sale_date.items():
+        if last_sale is None:
+            continue
+        days = (as_of - last_sale).days
+        if days > idle_days_threshold:
+            idle[item_id] = days
+    return idle
+
+
 def _decide_item(
     *,
     lead_time_days: int,
@@ -365,6 +471,7 @@ def _decide_item(
     cell_params: Params,
     as_of: date,
     variation_lookback_days: int,
+    real_position: _RealPosition | None = None,
 ) -> tuple[float, float, float, float, float]:
     """Roda o `Simulator` do item até a véspera de `as_of` (posição real, não
     inventada), decide `as_of` explicitamente e devolve
@@ -383,6 +490,11 @@ def _decide_item(
     porque este módulo precisa da quantidade DESEJADA antes de
     `apply_supplier_constraints` consolidar por fornecedor -- o loop por par
     loja-item não faz essa consolidação, de propósito (CLAUDE.md, seção 5).
+
+    `real_position` (modo `canonical`, cliente com tabela `stock`): posição REAL
+    (saldo da tabela, pedidos em aberto, compras das notas) -- o simulador NÃO roda,
+    porque para um cliente a posição simulada seria estoque inventado. `None`
+    mantém o comportamento original (Favorita e modo demonstração).
     """
     forecaster = StatisticalForecaster(
         level_window_weeks=cell_params.forecast_statistical.level_window_weeks,
@@ -392,28 +504,38 @@ def _decide_item(
     policy = BasestockPolicy(
         alpha=ARM2_CHOSEN_ALPHA, expected_window_days=lead_time_days + review_period_days
     )
-    simulator = build_simulator_for_pair(
-        demand=demand,
-        forecaster=forecaster,
-        policy=policy,
-        lead_time_days=lead_time_days,
-        review_period_days=review_period_days,
-        start=cell_params.simulation.start_date,
-        warmup_days=cell_params.simulation.warmup_days,
-        quantiles=cell_params.model.quantiles,
-    )
-    events = simulator.run(cell_params.simulation.start_date, as_of - timedelta(days=1))
-    on_hand, in_transit = simulator.position()
+    if real_position is None:
+        simulator = build_simulator_for_pair(
+            demand=demand,
+            forecaster=forecaster,
+            policy=policy,
+            lead_time_days=lead_time_days,
+            review_period_days=review_period_days,
+            start=cell_params.simulation.start_date,
+            warmup_days=cell_params.simulation.warmup_days,
+            quantiles=cell_params.model.quantiles,
+        )
+        events = simulator.run(cell_params.simulation.start_date, as_of - timedelta(days=1))
+        on_hand, in_transit = simulator.position()
 
-    lookback_start = as_of - timedelta(days=variation_lookback_days)
-    recent_orders = [
-        e.order_placed
-        for e in events
-        if e.order_placed is not None and e.order_placed > 0.0 and lookback_start <= e.day < as_of
-    ]
-    recent_average_purchase = statistics.mean(recent_orders) if recent_orders else 0.0
+        lookback_start = as_of - timedelta(days=variation_lookback_days)
+        recent_orders = [
+            e.order_placed
+            for e in events
+            if e.order_placed is not None
+            and e.order_placed > 0.0
+            and lookback_start <= e.day < as_of
+        ]
+        recent_average_purchase = statistics.mean(recent_orders) if recent_orders else 0.0
+    else:
+        on_hand = real_position.on_hand
+        in_transit = real_position.in_transit
+        recent_average_purchase = real_position.recent_average_purchase
 
     history = demand.filter(pl.col("date") < as_of)
+    if real_position is not None and history.filter(pl.col("units_sold") > 0.0).height == 0:
+        # nenhuma venda: nada a prever -- o item sai pela regra de item novo, não por modelo
+        return 0.0, on_hand, in_transit, 0.0, recent_average_purchase
     forecaster.fit(history, as_of=as_of)
     forecast = forecaster.predict_quantiles(
         as_of, lead_time_days + review_period_days, [ARM2_CHOSEN_ALPHA]
@@ -442,13 +564,21 @@ class _ItemDecisions:
     item_purchase_info: dict[str, ItemPurchaseInfo]
     supplier_of: dict[str, str]
     category_of: dict[str, str]
+    description_of: dict[str, str | None] = field(default_factory=dict)
+    last_sale_date: dict[str, date | None] = field(default_factory=dict)
 
     def position(self, item_id: str) -> float:
         return self.on_hand[item_id] + self.in_transit[item_id]
 
 
 def _decide_all_items(
-    item_supplier: pl.DataFrame, *, sales_subset: pl.DataFrame, cell_params: Params, as_of: date
+    item_supplier: pl.DataFrame,
+    *,
+    sales_subset: pl.DataFrame,
+    cell_params: Params,
+    as_of: date,
+    terms: SupplierTerms = SupplierTerms.ASSUMED_CELL,
+    real_positions: dict[str, _RealPosition] | None = None,
 ) -> _ItemDecisions:
     """Roda `_decide_item` para cada linha de `item_supplier` (item + dados
     de fornecedor já resolvidos por join) e agrega os resultados por item_id."""
@@ -471,7 +601,12 @@ def _decide_all_items(
         item_id = row["item_id"]
         decisions.supplier_of[item_id] = row["supplier_id"]
         decisions.category_of[item_id] = row["category"]
-        pack_multiple = _pack_multiple_for(row["category"], cell_params)
+        if terms is SupplierTerms.CANONICAL:
+            declared_pack = row["pack_multiple"]
+            pack_multiple = float(declared_pack) if declared_pack is not None else 1.0
+        else:
+            pack_multiple = _pack_multiple_for(row["category"], cell_params)
+        decisions.description_of[item_id] = row.get("description")
         decisions.item_purchase_info[item_id] = ItemPurchaseInfo(
             pack_multiple=pack_multiple, cost=float(row["cost"]), unit_of_sale=row["unit_of_sale"]
         )
@@ -483,6 +618,7 @@ def _decide_all_items(
         first_sale, days_with_sales = _first_sale_and_days_with_sales(demand, as_of)
         decisions.first_sale_date[item_id] = first_sale
         decisions.days_with_sales[item_id] = days_with_sales
+        decisions.last_sale_date[item_id] = _last_sale_date(demand, as_of)
 
         lead_time_days = int(row["lead_time_days"])
         review_period_days = int(row["review_period_days"])
@@ -495,6 +631,7 @@ def _decide_all_items(
             cell_params=cell_params,
             as_of=as_of,
             variation_lookback_days=lookback_days,
+            real_position=None if real_positions is None else real_positions[item_id],
         )
         decisions.desired[item_id] = raw_quantity
         decisions.on_hand[item_id] = on_hand
@@ -525,7 +662,11 @@ def _classify_new_items(
 
 
 def _apply_item_level_guardrails(
-    decisions: _ItemDecisions, *, is_new: dict[str, bool], cell_params: Params
+    decisions: _ItemDecisions,
+    *,
+    is_new: dict[str, bool],
+    cell_params: Params,
+    idle: frozenset[str] = frozenset(),
 ) -> tuple[dict[str, float], dict[str, list[GuardrailFlag]]]:
     """Regras 1, 2 e 4 (teto de cobertura, limite de variação, item novo) --
     a 3 (restrição de caixa) roda depois, no portfólio inteiro
@@ -534,13 +675,18 @@ def _apply_item_level_guardrails(
     Ordem interna, fixa: regras 1+2 sobre os não-novos primeiro (porque a
     mediana da regra 4 usa a quantidade JÁ cortada pela regra 1 dos
     não-novos); regra 4 sobre os novos depois.
+
+    `idle` (modo canonical): itens parados -- com histórico e sem venda há mais de N dias --
+    saem com quantidade 0 e ficam FORA da mediana da categoria (um item parado não é
+    referência de demanda para o item novo). O motivo de exceção é montado por quem chama.
+    Na regra 4, a quantidade do item novo desconta a posição: `max(0, mediana - posição)`.
     """
     g = cell_params.guardrails
     quantities: dict[str, float] = {}
     flags: dict[str, list[GuardrailFlag]] = {item_id: [] for item_id in decisions.desired}
 
     for item_id, raw_qty in decisions.desired.items():
-        if is_new[item_id]:
+        if is_new[item_id] or item_id in idle:
             continue
         category = decisions.category_of[item_id]
         capped_qty, cap_flag = apply_coverage_cap(
@@ -572,7 +718,7 @@ def _apply_item_level_guardrails(
     global_median = statistics.median(quantities.values()) if quantities else 0.0
 
     for item_id, item_is_new in is_new.items():
-        if not item_is_new:
+        if not item_is_new or item_id in idle:
             continue
         category = decisions.category_of[item_id]
         used_global_fallback = category not in medians_by_category
@@ -582,9 +728,13 @@ def _apply_item_level_guardrails(
             model_suggested_quantity=decisions.desired[item_id],
             category_median_quantity=median_qty,
             used_global_fallback=used_global_fallback,
+            position=decisions.position(item_id),
         )
         flags[item_id].append(flag)
-        quantities[item_id] = median_qty
+        quantities[item_id] = flag.adjusted_quantity
+
+    for item_id in idle:
+        quantities[item_id] = 0.0
 
     return quantities, flags
 
@@ -599,6 +749,9 @@ def _build_supplier_list(
     guardrail_flags: dict[str, list[GuardrailFlag]],
     cell_params: Params,
     as_of: date,
+    terms: SupplierTerms = SupplierTerms.ASSUMED_CELL,
+    item_reasons: dict[str, str] | None = None,
+    supplier_reason: str | None = None,
 ) -> SupplierPurchaseList | None:
     """`None` quando o fornecedor está fora do calendário de pedido hoje --
     ausência, não exceção (ver docstring de `OrderOutcome`).
@@ -611,9 +764,16 @@ def _build_supplier_list(
 
     A restrição de caixa (regra 3) NÃO é aplicada aqui -- roda depois,
     sobre o portfólio inteiro (`_finalize_with_cash_constraint`).
+
+    Modo `canonical` (`terms`): o pedido mínimo é o do fornecedor
+    (`sup_row["min_order_value"]`, da entrevista), e o fornecedor PODE ter várias
+    categorias -- a trava de "uma categoria por fornecedor" é do Favorita.
+    `item_reasons`/`supplier_reason` acrescentam um motivo de exceção (saldo não
+    informado; pedido anterior possivelmente em trânsito).
     """
     categories = {decisions.category_of[item_id] for item_id in supplier_item_ids}
-    if len(categories) != 1:
+    canonical = terms is SupplierTerms.CANONICAL
+    if len(categories) != 1 and not canonical:
         msg = (
             f"fornecedor {supplier_id!r} tem itens de categorias diferentes "
             f"({sorted(categories)}) -- _min_order_value_for assume uma categoria só "
@@ -621,14 +781,18 @@ def _build_supplier_list(
             "isso quebrou."
         )
         raise ValueError(msg)
-    category = next(iter(categories))
+    category = next(iter(categories)) if len(categories) == 1 else "várias categorias"
 
     supplier = Supplier(
         supplier_id=supplier_id,
         lead_time_days=sup_row["lead_time_days"],
         order_days=sup_row["order_days"],
         review_period_days=sup_row["review_period_days"],
-        min_order_value=_min_order_value_for(category, cell_params),
+        min_order_value=(
+            float(sup_row["min_order_value"])
+            if canonical
+            else _min_order_value_for(category, cell_params)
+        ),
         min_order_units=sup_row["min_order_units"],
     )
     if as_of.isoweekday() not in supplier.order_days:
@@ -665,12 +829,21 @@ def _build_supplier_list(
         final_qty = order_result.order[item_id]
         supplier_reasons = adjustments_by_item.get(item_id, [])
         item_guardrail_flags = guardrail_flags.get(item_id, [])
-        is_exception = bool(item_guardrail_flags) or any(
-            r in _EXCEPTION_SUPPLIER_REASONS for r in supplier_reasons
+        extra_reasons = tuple(
+            reason
+            for reason in ((item_reasons or {}).get(item_id), supplier_reason)
+            if reason is not None
+        )
+        is_exception = (
+            bool(item_guardrail_flags)
+            or any(r in _EXCEPTION_SUPPLIER_REASONS for r in supplier_reasons)
+            or bool(extra_reasons)
         )
         pack_multiple = supplier_purchase_info[item_id].pack_multiple
-        adjustments = tuple(_ADJUSTMENT_LABELS[r] for r in supplier_reasons) + tuple(
-            f.detail for f in item_guardrail_flags
+        adjustments = (
+            tuple(_ADJUSTMENT_LABELS[r] for r in supplier_reasons)
+            + tuple(f.detail for f in item_guardrail_flags)
+            + extra_reasons
         )
         row = PurchaseListRow(
             item_id=item_id,
@@ -687,6 +860,7 @@ def _build_supplier_list(
             margin_pct=decisions.margin_pct[item_id],
             adjustments=adjustments,
             is_exception=is_exception,
+            description=decisions.description_of.get(item_id),
         )
         (exception_rows if is_exception else main_rows).append(row)
 
@@ -697,6 +871,8 @@ def _build_supplier_list(
         min_order_value=supplier.min_order_value,
         main=tuple(main_rows),
         exceptions=tuple(exception_rows),
+        lead_time_days=supplier.lead_time_days if canonical else None,
+        review_period_days=supplier.review_period_days if canonical else None,
     )
 
 
@@ -772,49 +948,246 @@ def _finalize_with_cash_constraint(
     return finalized, cash_flags, alert
 
 
+def _single_store_id(sales: pl.LazyFrame) -> str:
+    stores = sales.select("store_id").unique().collect()["store_id"].to_list()
+    if len(stores) != 1:
+        msg = (
+            f"modo canonical espera vendas de UMA loja; a tabela tem {len(stores)} "
+            f"({sorted(stores)[:5]}) -- filtre a loja antes de chamar."
+        )
+        raise ValueError(msg)
+    return str(stores[0])
+
+
+def _require_shelf_life_for_every_category(items: pl.DataFrame, cell_params: Params) -> None:
+    known = set(cell_params.guardrails.shelf_life_days_by_category)
+    missing = sorted(set(items["category"].unique().to_list()) - known)
+    if missing:
+        msg = (
+            f"categorias sem validade em guardrails.shelf_life_days_by_category: {missing}. "
+            "No modo canonical use `motor.io.loaders_cliente.client_params_for(base, result)`, "
+            "que deriva a validade por categoria do cadastro do cliente."
+        )
+        raise ValueError(msg)
+
+
+def _resolve_canonical_positions(
+    *,
+    tables: CanonicalTables,
+    inputs: CanonicalInputs,
+    item_ids: list[str],
+    as_of: date,
+    lookback_days: int,
+) -> tuple[dict[str, _RealPosition] | None, frozenset[str], ListProvenance]:
+    """Posição REAL de cada item (modo canonical com tabela `stock`), ou `None` quando não há
+    `stock` -- aí a lista é só demonstração e o simulador inventa a posição.
+
+    `on_hand`: linha mais recente de `stock` com data <= véspera de `as_of` (a posição que
+    o comprador enxerga ao decidir, nunca a do próprio dia). `in_transit`: soma dos pedidos
+    em aberto do item; sem o arquivo, 0 (declarado). Média de compras recentes: média das
+    compras (notas) em `[as_of - lookback, as_of)`; sem histórico, 0 (limite desligado)."""
+    if tables.stock.height == 0:
+        provenance = ListProvenance(
+            supplier_terms=SupplierTerms.CANONICAL,
+            simulated_stock=True,
+            stock_date=None,
+            in_transit_source="simulado",
+            purchases_source="simulado",
+            cash_constraint_active=False,
+        )
+        return None, frozenset(), provenance
+
+    eve = as_of - timedelta(days=1)
+    latest = (
+        tables.stock.filter(pl.col("date") <= eve)
+        .sort("item_id", "date")
+        .group_by("item_id", maintain_order=True)
+        .last()
+    )
+    if latest.height == 0:
+        msg = f"tabela stock sem nenhum saldo até {eve} (véspera de {as_of}) -- nada a usar."
+        raise ValueError(msg)
+    on_hand = dict(zip(latest["item_id"], latest["on_hand"], strict=True))
+    stock_date = latest["date"].max()
+    assert isinstance(stock_date, date)
+
+    if inputs.open_orders is None:
+        in_transit: dict[str, float] = {}
+        in_transit_source = "zero_sem_arquivo"
+    else:
+        in_transit = {
+            r["item_id"]: float(r["quantity"])
+            for r in inputs.open_orders.group_by("item_id")
+            .agg(pl.col("quantity").sum())
+            .iter_rows(named=True)
+        }
+        in_transit_source = "pedidos_em_aberto"
+
+    recent_average: dict[str, float] = {}
+    if inputs.purchases is not None:
+        window = inputs.purchases.filter(
+            (pl.col("date") >= as_of - timedelta(days=lookback_days)) & (pl.col("date") < as_of)
+        )
+        recent_average = {
+            r["item_id"]: float(r["units"])
+            for r in window.group_by("item_id").agg(pl.col("units").mean()).iter_rows(named=True)
+        }
+
+    positions = {
+        item_id: _RealPosition(
+            on_hand=float(on_hand.get(item_id, 0.0)),
+            in_transit=in_transit.get(item_id, 0.0),
+            recent_average_purchase=recent_average.get(item_id, 0.0),
+        )
+        for item_id in item_ids
+    }
+    provenance = ListProvenance(
+        supplier_terms=SupplierTerms.CANONICAL,
+        simulated_stock=False,
+        stock_date=stock_date,
+        in_transit_source=in_transit_source,
+        purchases_source="ausente" if inputs.purchases is None else "notas",
+        cash_constraint_active=False,
+    )
+    return positions, frozenset(i for i in item_ids if i not in on_hand), provenance
+
+
+def _apply_cash_step(
+    preliminary: dict[str, SupplierPurchaseList],
+    *,
+    base_params: Params,
+    cell_params: Params,
+    canonical: bool,
+    provenance: ListProvenance | None,
+) -> tuple[dict[str, SupplierPurchaseList], tuple[GuardrailFlag, ...], CategoryFloorAlert | None]:
+    """Restrição de caixa (regra 3) e carimbo de proveniência nas listas.
+
+    Modo Favorita: orçamento de `guardrails.weekly_budget_rs`, como sempre. Modo canonical:
+    orçamento de `client_loader.weekly_budget_rs` -- e, se ele não foi informado, a restrição
+    fica DESLIGADA (nenhum orçamento é inventado; a aba Notas declara). A lista do cliente é
+    semanal, então o orçamento do ciclo é o semanal (7 dias), sem o fator de ciclo do Favorita."""
+    weekly_budget = base_params.client_loader.weekly_budget_rs if canonical else None
+    cash_flags: tuple[GuardrailFlag, ...] = ()
+    alert: CategoryFloorAlert | None = None
+    if canonical and weekly_budget is None:
+        results = preliminary
+    else:
+        cycle_budget_rs = (
+            weekly_budget
+            if weekly_budget is not None
+            else _cycle_budget_rs(cell_params.guardrails.weekly_budget_rs, CELL_REVIEW_PERIOD_DAYS)
+        )
+        results, cash_flags, alert = _finalize_with_cash_constraint(
+            preliminary,
+            budget_rs=cycle_budget_rs,
+            category_floor_fraction=cell_params.guardrails.cash_constraint_category_floor_fraction,
+        )
+    if provenance is not None:
+        stamped = replace(provenance, cash_constraint_active=weekly_budget is not None)
+        results = {sid: replace(lst, provenance=stamped) for sid, lst in results.items()}
+    return results, cash_flags, alert
+
+
 def generate_purchase_list(
-    as_of: date, *, base_params: Params, tables: CanonicalTables
+    as_of: date,
+    *,
+    base_params: Params,
+    tables: CanonicalTables,
+    supplier_terms: SupplierTerms = SupplierTerms.ASSUMED_CELL,
+    canonical_inputs: CanonicalInputs | None = None,
 ) -> tuple[dict[str, SupplierPurchaseList], GuardrailFiringReport]:
     """Gera a lista de compra de todos os fornecedores do subconjunto para
     `as_of`, com as quatro regras de guarda ativas (Etapa 3.16). Fornecedor
     fora do calendário de pedido hoje (`OrderOutcome.FORA_DO_CALENDARIO`)
-    não entra no dict -- ausência, não exceção."""
-    cell_params = build_arm2_single_alpha_params(base_params, ARM2_CHOSEN_ALPHA)
-    suppliers = cell_suppliers(tables.suppliers)
+    não entra no dict -- ausência, não exceção.
 
-    subset = load_or_select_subset(
-        tables.sales,
-        tables.items,
-        suppliers,
-        tables.stock,
-        cell_params,
-        cache_path=tables.subset_cache_path,
-    )
-    item_ids = list(subset.item_ids)
+    `supplier_terms=ASSUMED_CELL` (padrão) é o comportamento do Favorita, inalterado.
+    `CANONICAL` (Sprint 22, dado de cliente) lê fardo, pedido mínimo, lead time e revisão
+    das tabelas canônicas; todo item das tabelas entra (sem corte de 150-300 itens -- o
+    item sem histórico sai pela regra de item novo); `base_params` precisa ter sido
+    derivado de `motor.io.loaders_cliente.client_params_for`. Com tabela `stock`, a posição
+    é a REAL (saldo + pedidos em aberto + compras das notas) e o simulador não roda; sem
+    ela, a lista é DEMONSTRAÇÃO com estoque simulado (banner e aba Notas dizem isso)."""
+    canonical = supplier_terms is SupplierTerms.CANONICAL
+    if canonical_inputs is not None and not canonical:
+        msg = "canonical_inputs só vale com supplier_terms=SupplierTerms.CANONICAL"
+        raise ValueError(msg)
+
+    cell_params = build_arm2_single_alpha_params(base_params, ARM2_CHOSEN_ALPHA)
+    if canonical:
+        suppliers = tables.suppliers
+        _require_shelf_life_for_every_category(tables.items, cell_params)
+        store_id = _single_store_id(tables.sales)
+        item_ids = tables.items["item_id"].to_list()
+    else:
+        suppliers = cell_suppliers(tables.suppliers)
+        subset = load_or_select_subset(
+            tables.sales,
+            tables.items,
+            suppliers,
+            tables.stock,
+            cell_params,
+            cache_path=tables.subset_cache_path,
+        )
+        store_id = subset.store_id
+        item_ids = list(subset.item_ids)
 
     items_df = tables.items.filter(pl.col("item_id").is_in(item_ids))
     item_supplier = items_df.select(
-        "item_id", "category", "unit_of_sale", "cost", "price_ref", "supplier_id"
+        "item_id",
+        "category",
+        "unit_of_sale",
+        "cost",
+        "price_ref",
+        "supplier_id",
+        "pack_multiple",
+        "description",
     ).join(
         suppliers.select("supplier_id", "lead_time_days", "review_period_days"),
         on="supplier_id",
         how="left",
     )
     sales_subset = (
-        tables.sales.filter(
-            (pl.col("store_id") == subset.store_id) & (pl.col("item_id").is_in(item_ids))
-        )
+        tables.sales.filter((pl.col("store_id") == store_id) & (pl.col("item_id").is_in(item_ids)))
         .select("item_id", "date", "units_sold")
         .sort("item_id", "date")
         .collect()
     )
 
+    real_positions: dict[str, _RealPosition] | None = None
+    missing_stock: frozenset[str] = frozenset()
+    provenance: ListProvenance | None = None
+    if canonical:
+        real_positions, missing_stock, provenance = _resolve_canonical_positions(
+            tables=tables,
+            inputs=canonical_inputs or CanonicalInputs(purchases=None, open_orders=None),
+            item_ids=item_ids,
+            as_of=as_of,
+            lookback_days=cell_params.guardrails.variation_lookback_days,
+        )
+
     decisions = _decide_all_items(
-        item_supplier, sales_subset=sales_subset, cell_params=cell_params, as_of=as_of
+        item_supplier,
+        sales_subset=sales_subset,
+        cell_params=cell_params,
+        as_of=as_of,
+        terms=supplier_terms,
+        real_positions=real_positions,
+    )
+    idle_days: dict[str, int] = (
+        _classify_idle_items(
+            decisions,
+            as_of=as_of,
+            idle_days_threshold=base_params.client_loader.idle_days_threshold,
+        )
+        if canonical
+        else {}
     )
     is_new = _classify_new_items(decisions, cell_params, as_of)
+    for item_id in idle_days:
+        is_new[item_id] = False  # parado vence novo: tem histórico, só não vende mais
     final_desired, guardrail_flags = _apply_item_level_guardrails(
-        decisions, is_new=is_new, cell_params=cell_params
+        decisions, is_new=is_new, cell_params=cell_params, idle=frozenset(idle_days)
     )
 
     supplier_by_id = {row["supplier_id"]: row for row in suppliers.iter_rows(named=True)}
@@ -822,28 +1195,42 @@ def generate_purchase_list(
     for item_id, supplier_id in decisions.supplier_of.items():
         items_by_supplier.setdefault(supplier_id, []).append(item_id)
 
+    item_reasons = dict.fromkeys(missing_stock, NO_STOCK_ROW_REASON)
+    for item_id, days in idle_days.items():
+        idle_reason = f"item parado: {days} dias sem venda, saldo {decisions.on_hand[item_id]:g}"
+        item_reasons[item_id] = (
+            f"{item_reasons[item_id]}; {idle_reason}" if item_id in item_reasons else idle_reason
+        )
     preliminary: dict[str, SupplierPurchaseList] = {}
     for supplier_id, supplier_item_ids in items_by_supplier.items():
+        sup_row = supplier_by_id[supplier_id]
+        in_transit_unknown = (
+            provenance is not None
+            and provenance.in_transit_source == "zero_sem_arquivo"
+            and sup_row["lead_time_days"] >= sup_row["review_period_days"]
+        )
         supplier_list = _build_supplier_list(
             supplier_id,
             supplier_item_ids,
-            sup_row=supplier_by_id[supplier_id],
+            sup_row=sup_row,
             decisions=decisions,
             final_desired=final_desired,
             guardrail_flags=guardrail_flags,
             cell_params=cell_params,
             as_of=as_of,
+            terms=supplier_terms,
+            item_reasons=item_reasons,
+            supplier_reason=IN_TRANSIT_UNKNOWN_REASON if in_transit_unknown else None,
         )
         if supplier_list is not None:
             preliminary[supplier_id] = supplier_list
 
-    cycle_budget_rs = _cycle_budget_rs(
-        cell_params.guardrails.weekly_budget_rs, CELL_REVIEW_PERIOD_DAYS
-    )
-    results, cash_flags, category_floor_alert = _finalize_with_cash_constraint(
+    results, cash_flags, category_floor_alert = _apply_cash_step(
         preliminary,
-        budget_rs=cycle_budget_rs,
-        category_floor_fraction=cell_params.guardrails.cash_constraint_category_floor_fraction,
+        base_params=base_params,
+        cell_params=cell_params,
+        canonical=canonical,
+        provenance=provenance,
     )
 
     counts: Counter[GuardrailReason] = Counter()
@@ -898,34 +1285,97 @@ def _write_rows_sheet(
     money_format: object,
     number_format: object,
     empty_note: str,
+    banner: str | None = None,
+    with_description: bool = False,
 ) -> None:
+    """`banner` (modo demonstração) ocupa a primeira linha da aba; `with_description`
+    insere a coluna "descrição" depois do código. Sem nenhum dos dois, a aba é
+    idêntica à do Favorita."""
     sheet = workbook.add_worksheet(sheet_name)
-    sheet.freeze_panes(1, 0)
-    for col, header in enumerate(headers):
-        sheet.write(0, col, header, header_format)
-    for col, width in enumerate(_COLUMN_WIDTHS[: len(headers)]):
+    top = 0
+    if banner is not None:
+        banner_format = workbook.add_format(
+            {"bold": True, "bg_color": "#c00000", "font_color": "white"}
+        )
+        sheet.write(0, 0, banner, banner_format)
+        top = 1
+    sheet.freeze_panes(top + 1, 0)
+    offset = 1 if with_description else 0
+    full_headers = (headers[0], "descrição", *headers[1:]) if with_description else headers
+    widths = (_COLUMN_WIDTHS[0], 36, *_COLUMN_WIDTHS[1:]) if with_description else _COLUMN_WIDTHS
+    for col, header in enumerate(full_headers):
+        sheet.write(top, col, header, header_format)
+    for col, width in enumerate(widths[: len(full_headers)]):
         sheet.set_column(col, col, width)
 
     if not rows:
-        sheet.write(1, 0, empty_note)
+        sheet.write(top + 1, 0, empty_note)
         return
 
-    for r, row in enumerate(rows, start=1):
+    for r, row in enumerate(rows, start=top + 1):
         sheet.write(r, 0, row.item_id)
-        sheet.write(r, 1, row.category)
-        sheet.write(r, 2, row.unit_of_sale)
-        sheet.write_number(r, 3, row.quantity_units, number_format)
-        sheet.write_number(r, 4, row.quantity_packs, number_format)
-        sheet.write_number(r, 5, row.on_hand, number_format)
-        sheet.write_number(r, 6, row.in_transit, number_format)
+        if with_description:
+            sheet.write(r, 1, row.description or "")
+        sheet.write(r, 1 + offset, row.category)
+        sheet.write(r, 2 + offset, row.unit_of_sale)
+        sheet.write_number(r, 3 + offset, row.quantity_units, number_format)
+        sheet.write_number(r, 4 + offset, row.quantity_packs, number_format)
+        sheet.write_number(r, 5 + offset, row.on_hand, number_format)
+        sheet.write_number(r, 6 + offset, row.in_transit, number_format)
         if row.coverage_days_after_order is None:
-            sheet.write(r, 7, "sem demanda recente")
+            sheet.write(r, 7 + offset, "sem demanda recente")
         else:
-            sheet.write_number(r, 7, row.coverage_days_after_order, number_format)
-        sheet.write_number(r, 8, row.value_rs, money_format)
-        if len(headers) > 9:  # aba Exceções -- motivo
-            sheet.write(r, 9, "; ".join(row.adjustments))
-    sheet.autofilter(0, 0, len(rows), len(headers) - 1)
+            sheet.write_number(r, 7 + offset, row.coverage_days_after_order, number_format)
+        sheet.write_number(r, 8 + offset, row.value_rs, money_format)
+        if len(full_headers) > 9 + offset:  # aba Exceções -- motivo
+            sheet.write(r, 9 + offset, "; ".join(row.adjustments))
+    sheet.autofilter(top, 0, top + len(rows), len(full_headers) - 1)
+
+
+def _canonical_notes(supplier_list: SupplierPurchaseList, as_of: date) -> list[str]:
+    """Aba Notas do modo `canonical`: declara de onde veio cada insumo e o que ficou
+    desligado. Nada que não valha para o cliente (premissas por categoria do
+    Favorita, "descrição nula") aparece aqui."""
+    prov = supplier_list.provenance
+    assert prov is not None
+    lead, review = supplier_list.lead_time_days, supplier_list.review_period_days
+    notes = [
+        f"Fornecedor: {supplier_list.supplier_id} -- data de decisão: {as_of.isoformat()} "
+        f"-- resultado do pedido: {_OUTCOME_LABELS[supplier_list.outcome]}.",
+        f"Política: braço 2 (estatístico + nível-alvo), alpha={ARM2_CHOSEN_ALPHA}.",
+        f"alpha={ARM2_CHOSEN_ALPHA} foi calibrado (Etapa 3.12) na célula lead_time=7/"
+        f"review_period=14. Com os prazos deste fornecedor (lead time {lead} dias, revisão "
+        f"{review} dias) a lista é uma combinação NÃO MEDIDA de política e prazos: o nível de "
+        "serviço real pode diferir do medido.",
+        "Fardo, pedido mínimo, lead time e período de revisão vêm das tabelas do cliente "
+        "(NF-e, cadastro e entrevista de fornecedores), não dos valores assumidos do Favorita. "
+        f"Pedido mínimo deste fornecedor: R$ {supplier_list.min_order_value:,.2f}.",
+    ]
+    if prov.simulated_stock:
+        notes.insert(1, DEMO_STOCK_NOTE)
+    else:
+        notes.append(
+            f"Estoque em mãos: tabela stock do cliente, posição de {prov.stock_date} (a mais "
+            f"recente anterior a {as_of.isoformat()}). Item sem linha de saldo vai para "
+            "Exceções com saldo 0."
+        )
+        if prov.in_transit_source == "zero_sem_arquivo":
+            notes.append(NO_OPEN_ORDERS_NOTE)
+        else:
+            notes.append("Em trânsito: soma dos pedidos em aberto informados pelo cliente.")
+        if prov.purchases_source == "ausente":
+            notes.append(NO_PURCHASE_HISTORY_NOTE)
+        else:
+            notes.append(
+                "Limite de variação: média das compras reais (notas fiscais de entrada) "
+                "dos últimos 90 dias."
+            )
+    if not prov.cash_constraint_active:
+        notes.append(CASH_OFF_NOTE)
+    else:
+        notes += [CASH_CONSTRAINT_LIMITATION_NOTE, CASH_CONSTRAINT_CATEGORY_FLOOR_NOTE]
+    notes += [GUARDRAILS_NOTE, RISK_WINDOW_ARCHITECTURE_LIMITATION_NOTE, ISO_SERVICE_SCOPE_NOTE]
+    return notes
 
 
 def write_supplier_workbook(
@@ -949,6 +1399,9 @@ def write_supplier_workbook(
     number_format = workbook.add_format({"num_format": "#,##0.00"})
     note_format = workbook.add_format({"text_wrap": True, "valign": "top"})
 
+    provenance = supplier_list.provenance
+    banner = DEMO_BANNER if provenance is not None and provenance.simulated_stock else None
+    with_description = any(r.description for r in (*supplier_list.main, *supplier_list.exceptions))
     _write_rows_sheet(
         workbook,
         "Lista principal",
@@ -958,6 +1411,8 @@ def write_supplier_workbook(
         money_format=money_format,
         number_format=number_format,
         empty_note="Nenhum item nesta lista para esta data de decisão.",
+        banner=banner,
+        with_description=with_description,
     )
     if supplier_list.min_order_value > 0.0:
         exceptions_empty_note = (
@@ -980,10 +1435,19 @@ def write_supplier_workbook(
         money_format=money_format,
         number_format=number_format,
         empty_note=exceptions_empty_note,
+        banner=banner,
+        with_description=with_description,
     )
 
     notes_sheet = workbook.add_worksheet("Notas")
     notes_sheet.set_column(0, 0, 110)
+    notes_top = 0
+    if banner is not None:
+        banner_format = workbook.add_format(
+            {"bold": True, "bg_color": "#c00000", "font_color": "white"}
+        )
+        notes_sheet.write(0, 0, banner, banner_format)
+        notes_top = 1
     min_order_note = (
         f"min_order_value desta categoria ({supplier_list.category}): "
         f"R$ {supplier_list.min_order_value:,.2f}."
@@ -1005,7 +1469,9 @@ def write_supplier_workbook(
         '"Sugestão (fardos)" = "sugestão (unidades)" / pack_multiple (fardo real por '
         "família de categoria, Etapa 3.15 -- ver nota acima).",
     ]
-    for r, text in enumerate(notes):
+    if provenance is not None:
+        notes = _canonical_notes(supplier_list, as_of)
+    for r, text in enumerate(notes, start=notes_top):
         notes_sheet.write(r, 0, text, note_format)
         notes_sheet.set_row(r, 34)
 
