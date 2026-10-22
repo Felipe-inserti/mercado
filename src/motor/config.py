@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from datetime import date
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Any, ClassVar
 
 import yaml
 from annotated_types import Ge, Gt, Le, MinLen
@@ -514,6 +514,92 @@ class CanonicalParams(ParamsSection):
     anomalies: list[AnomalyPeriodParams]
 
 
+class MissingParamError(ValueError):
+    """Parâmetro que depende do dado real e ainda está `null` em `params.yaml`."""
+
+
+class PilotSection(ParamsSection):
+    """Seção de `mercado_piloto`: campos `null` só falham quando USADOS.
+
+    `params.yaml` carrega com `null` (o valor depende do dado real do mercado
+    piloto e não pode ser chutado); quem precisa do valor chama `require`,
+    que levanta `MissingParamError` com o caminho completo da chave.
+    """
+
+    yaml_path: ClassVar[str]
+
+    def require(self, field: str) -> Any:
+        """Devolve `field`; se for `None`, levanta erro dizendo qual chave preencher."""
+        value = getattr(self, field)
+        if value is None:
+            msg = (
+                f"{self.yaml_path}.{field} está null -- depende do dado real do mercado "
+                f"piloto; preencha em config/params.yaml antes de usar."
+            )
+            raise MissingParamError(msg)
+        return value
+
+
+class CensuraParams(PilotSection):
+    """Detecção de demanda censurada por falta de estoque (Sprint 24, etapa 24.4)."""
+
+    yaml_path: ClassVar[str] = "mercado_piloto.censura"
+
+    ativa: bool = False
+    janela_dias: PositiveInt
+    media_minima_por_dia: NonNegativeFloat | None = None
+    dias_minimos_com_venda: PositiveInt | None = None
+    dias_sem_entrada_antes: PositiveInt
+    alerta_percentual_dias_censurados: Fraction
+
+    @model_validator(mode="after")
+    def _dias_minimos_cabem_na_janela(self) -> CensuraParams:
+        """Não dá para exigir mais dias com venda do que a janela tem."""
+        minimos = self.dias_minimos_com_venda
+        if minimos is not None and minimos > self.janela_dias:
+            msg = (
+                f"{self.yaml_path}.dias_minimos_com_venda={minimos!r} excede "
+                f"{self.yaml_path}.janela_dias={self.janela_dias!r} -- a janela não tem "
+                "dias suficientes para satisfazer o mínimo."
+            )
+            raise ValueError(msg)
+        return self
+
+
+class QualidadeParams(PilotSection):
+    """Limiares do relatório de qualidade do dado de entrada (Sprint 24)."""
+
+    yaml_path: ClassVar[str] = "mercado_piloto.qualidade"
+
+    limite_percentual_critico: Fraction
+    cadastro_minimo_completo: Fraction
+    janela_regularidade_dias: PositiveInt
+    percentual_dias_com_venda_regular: Fraction
+
+
+class AvaliacaoParams(PilotSection):
+    """Avaliação da previsão no dado do piloto (Sprint 24, etapa 24.2).
+
+    `quantis_cobertura`: `model.quantiles` não tem quantil abaixo da mediana,
+    então a cobertura é unilateral por quantil (fração com real <= quantil
+    previsto); cada valor precisa estar em `model.quantiles` (validado em
+    `Params`).
+    """
+
+    yaml_path: ClassVar[str] = "mercado_piloto.avaliacao"
+
+    janela_teste_semanas: PositiveInt | None = None
+    quantis_cobertura: Annotated[list[Fraction], MinLen(1)]
+
+
+class MercadoPilotoParams(ParamsSection):
+    """Premissas do mercado piloto (Sprint 24); ver `config/params.yaml`."""
+
+    censura: CensuraParams
+    qualidade: QualidadeParams
+    avaliacao: AvaliacaoParams
+
+
 class Params(ParamsSection):
     """Todas as premissas numéricas do projeto, carregadas de `config/params.yaml`."""
 
@@ -534,6 +620,20 @@ class Params(ParamsSection):
     quantile_gbm: QuantileGbmParams
     experiments: ExperimentsParams
     canonical: CanonicalParams
+    mercado_piloto: MercadoPilotoParams
+
+    @model_validator(mode="after")
+    def _quantis_cobertura_na_grade_de_quantis(self) -> Params:
+        """Cobertura só é calculável para quantis que o forecaster produz."""
+        grade = self.model.quantiles
+        for q in self.mercado_piloto.avaliacao.quantis_cobertura:
+            if q not in set(grade):
+                msg = (
+                    f"mercado_piloto.avaliacao.quantis_cobertura contém {q!r}, que não é um "
+                    f"dos quantis produzidos pelo forecaster (model.quantiles={grade!r})."
+                )
+                raise ValueError(msg)
+        return self
 
     @model_validator(mode="after")
     def _alpha_bate_com_a_grade_de_quantis(self) -> Params:

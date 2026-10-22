@@ -563,3 +563,22 @@ canonical:
       start: 2016-04-16 # medido: volume diário nacional sobe de ~650-700k/dia para pico de 1,35M em 2016-04-18
       end: 2016-04-24 # medido: volume diário nacional volta à faixa de base (~680k) em 2016-04-25
       reason: "Terremoto M7.8 no Equador em 16/04/2016; pico de compra de emergência em 49 das 54 lojas"
+
+mercado_piloto:
+  # Sprint 24: preparação para o dado real do mercado piloto. Valor `null` = depende do
+  # dado real e NÃO pode ser chutado aqui; quem o usa falha com o nome da chave.
+  censura:
+    ativa: false # desligada por padrão: liga sem mexer em código
+    janela_dias: 28 # arbitrado: 4 semanas completas, cobre o ciclo semanal sem misturar regime velho
+    media_minima_por_dia: null # decidir com o dado real
+    dias_minimos_com_venda: null # decidir com o dado real
+    dias_sem_entrada_antes: 3 # arbitrado
+    alerta_percentual_dias_censurados: 0.15 # arbitrado
+  qualidade:
+    limite_percentual_critico: 0.02 # arbitrado
+    cadastro_minimo_completo: 0.90 # arbitrado
+    janela_regularidade_dias: 28 # arbitrado
+    percentual_dias_com_venda_regular: 0.80 # arbitrado
+  avaliacao:
+    janela_teste_semanas: null # decidir com a dona: 8 a 12
+    quantis_cobertura: [0.8, 0.9, 0.95] # arbitrado: model.quantiles não tem quantil abaixo da mediana, então a cobertura é unilateral (real <= quantil previsto)

@@ -51,14 +51,15 @@ mercado_piloto:
     percentual_dias_com_venda_regular: 0.80
   avaliacao:
     janela_teste_semanas: null        # decidir com a dona: 8 a 12
-    quantil_inferior: 0.1
-    quantil_superior: 0.9
+    quantis_cobertura: [0.8, 0.9, 0.95]   # subconjunto de model.quantiles (validado em Params)
 ```
 
 - Modelos Pydantic correspondentes em `config.py`. Campos `null` são `Optional`, mas um acessor (ex.: `require(campo)`) levanta erro dizendo **qual** chave está vazia e onde preencher.
 - `censura.ativa` com padrão `false`, para ligar e desligar sem mexer em código.
 
-**Testes:** as chaves novas carregam; usar um campo `null` levanta erro com o nome da chave; `censura.ativa: false` é o padrão.
+- `Params` rejeita qualquer valor de `avaliacao.quantis_cobertura` que não esteja em `model.quantiles` (que não tem quantil abaixo da mediana, por isso a cobertura é unilateral por quantil, e não um intervalo).
+
+**Testes:** as chaves novas carregam; usar um campo `null` levanta erro com o nome da chave; `censura.ativa: false` é o padrão; `quantis_cobertura` fora de `model.quantiles` é rejeitado.
 
 **Pronto quando:** o `params.yaml` carrega e nenhum teste antigo muda.
 
@@ -71,7 +72,7 @@ Funções puras sobre arrays/Series alinhados. Todas aceitam `mask` opcional (bo
 - `relative_mae(actual, forecast, naive_forecast, mask=None) -> float | None` — MAE do método ÷ MAE do naive sazonal **na mesma janela de teste**. Abaixo de 1 = melhor que o naive. Docstring diz explicitamente que não é o MASE clássico.
 - `wape_weighted(actual, forecast, unit_value, mask=None) -> float | None` — Σ|erro|×valor ÷ Σreal×valor.
 - `bias(actual, forecast, mask=None) -> float | None` — Σ(previsão − real) ÷ Σreal. Positivo = superestima.
-- `interval_coverage(actual, lower, upper, mask=None) -> float | None` — fração dentro de [lower, upper]. O nível nominal (0,9 − 0,1 = 0,8) vem do `params.yaml` e é reportado ao lado.
+- `quantile_coverage(actual, forecast_q, mask=None) -> float | None` — fração das observações com real ≤ quantil previsto. Calculada para cada quantil de `avaliacao.quantis_cobertura`, com o nível nominal (o próprio quantil) reportado ao lado.
 - Observação com `None` em `forecast` ou `naive_forecast` é excluída das duas contas.
 - Denominador zero → `None`. Nunca `inf` nem `NaN`.
 
