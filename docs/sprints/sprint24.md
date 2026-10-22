@@ -6,14 +6,14 @@ Origem: documento "Mudanças no código antes de rodar" (itens B a H), com as co
 
 **Objetivo único:** quando a primeira amostra do mercado chegar, escrever só o adaptador e rodar o backtest. Nada acima de `io/` muda depois desta sprint.
 
-**Estado de partida:** 367 testes passando, 1 pulado (verificar no passo 24.0). Vale o `CLAUDE.md` inteiro: premissas em `params.yaml`, funções puras, polars, determinismo, docstrings em português e identificadores em inglês. Comandos sempre com `uv run` (`uv run pytest`, `uv run ruff`, `uv run mypy`).
+**Estado de partida:** 368 testes, 0 pulados, 76% de cobertura (22/10/2026). Vale o `CLAUDE.md` inteiro: premissas em `params.yaml`, funções puras, polars, determinismo, docstrings em português e identificadores em inglês. Comandos sempre com `uv run` (`uv run pytest`, `uv run ruff`, `uv run mypy`).
 
 ---
 
 ## Regras da sprint
 
 1. **Uma etapa por vez, nesta ordem.** Não começar a próxima com a anterior vermelha.
-2. **Ao fim de cada etapa:** `uv run pytest`, `uv run ruff check .`, `uv run ruff format --check .` e `uv run mypy src/` passam; o diff inteiro é lido; um commit com mensagem descrevendo a etapa.
+2. **Ao fim de cada etapa:** `uv run pytest`, `uv run ruff check .`, `uv run ruff format --check .` e `uv run mypy src/` passam; o diff inteiro é lido; o commit é feito pelo usuário (o Claude sugere a mensagem e não executa `git add`/`git commit`).
 3. **Não alterar:** `inventory.py`, `policy/supplier.py`, `policy/guardrails.py`, `policy/basestock.py`, `metrics/financial.py`, `io/loaders.py` e `io/raw.py`. `simulator/engine.py` só ganha a chamada da censura (24.4).
 4. **Nenhum valor escondido.** Parâmetro que depende do dado real fica `null` no `params.yaml` e o código falha com mensagem clara se ele for usado vazio. Teste pode usar valores provisórios; o `params.yaml`, não.
 5. **Regressão do Favorita** antes e depois das etapas que tocam o histórico (24.4 e 24.5). Mudou sem explicação, para.
@@ -26,6 +26,8 @@ Origem: documento "Mudanças no código antes de rodar" (itens B a H), com as co
 - Rodar a suíte e anotar: número de testes, pulados, cobertura.
 - Rodar o experimento atual do Favorita e salvar o manifesto e os resultados em `results/baseline_sprint24/` (fora do git, se `results/` já estiver no `.gitignore`).
 - Criar `tests/test_regression_favorita.py` (ou equivalente) que compara o resultado atual com esse manifesto. É ele que segura as etapas 24.4 e 24.5.
+
+- Referência congelada em `tests/regression/favorita_baseline.json`. Comando (lento, fora do pytest padrão): `uv run pytest -m regression --no-cov tests/test_regression_favorita.py`.
 
 **Pronto quando:** o teste de regressão passa no código sem nenhuma mudança.
 
