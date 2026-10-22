@@ -68,6 +68,7 @@ import polars as pl
 
 from motor.config import FeaturesParams
 from motor.features.calendar import StoreLocale, build_calendar_features
+from motor.features.censoring import drop_censored
 
 
 def _target_item_ids(items: pl.DataFrame, item_ids: Sequence[str] | None) -> list[str]:
@@ -158,6 +159,7 @@ def build_features(
     calendar: pl.DataFrame,
     params: FeaturesParams,
     item_ids: Sequence[str] | None = None,
+    censoring_flags: pl.DataFrame | None = None,
 ) -> pl.DataFrame:
     """Uma linha por item elegível (`item_ids`, ou todo item de `items` se
     omitido), com as colunas de `params.active_features`.
@@ -176,6 +178,13 @@ def build_features(
     não bater). Item sem nenhuma linha em `sales` antes de `as_of` ainda
     ganha uma linha na saída: colunas de calendário/atributo preenchidas,
     colunas de histórico `null` -- não removida (ver docstring do módulo).
+
+    `censoring_flags` (Sprint 24, 24.4): saída de `flag_probable_stockout`
+    (painel: `store_id`, `item_id`, `date`, `is_censored`). Os dias marcados
+    saem do histórico ANTES de qualquer lag/janela -- um dia de ruptura não é
+    demanda zero. `None` = comportamento anterior. Não é `stock`: o saldo
+    continua fora desta função (Emenda Sprint 15); entra só a decisão já
+    tomada de quais dias não valem como demanda.
     """
     if calendar.height != 1:
         msg = f"`calendar` deve ter exatamente 1 linha (a de `as_of`); recebeu {calendar.height}"
@@ -189,6 +198,8 @@ def build_features(
     result = pl.DataFrame({"item_id": target_ids})
 
     history = sales.filter((pl.col("store_id") == store_id) & (pl.col("date") < as_of))
+    if censoring_flags is not None:
+        history = drop_censored(history, censoring_flags)
 
     for lag in params.historico.lag_days:
         result = result.join(_lag_feature(history, as_of, lag), on="item_id", how="left")
@@ -227,6 +238,7 @@ def build_training_matrix(
     holidays: pl.DataFrame,
     params: FeaturesParams,
     item_ids: Sequence[str] | None = None,
+    censoring_flags: pl.DataFrame | None = None,
 ) -> pl.DataFrame:
     """Empilha `build_features` para cada `as_of` em `as_of_dates`, sem alvo
     (o alvo -- demanda acumulada futura -- é Sprint 15).
@@ -254,6 +266,7 @@ def build_training_matrix(
                 calendar=calendar,
                 params=params,
                 item_ids=item_ids,
+                censoring_flags=censoring_flags,
             )
         )
     return pl.concat(frames)

@@ -110,6 +110,7 @@ from motor.experiments.iso_service import (
 )
 from motor.experiments.run import load_or_select_subset
 from motor.experiments.shared import build_simulator_for_pair
+from motor.features.censoring import drop_censored, flags_for_item, flags_if_active
 from motor.forecast.statistical import StatisticalForecaster
 from motor.io.contracts import Supplier
 from motor.policy.base import DecisionContext
@@ -365,6 +366,7 @@ def _decide_item(
     cell_params: Params,
     as_of: date,
     variation_lookback_days: int,
+    censoring_flags: pl.DataFrame | None = None,
 ) -> tuple[float, float, float, float, float]:
     """Roda o `Simulator` do item até a véspera de `as_of` (posição real, não
     inventada), decide `as_of` explicitamente e devolve
@@ -383,6 +385,12 @@ def _decide_item(
     porque este módulo precisa da quantidade DESEJADA antes de
     `apply_supplier_constraints` consolidar por fornecedor -- o loop por par
     loja-item não faz essa consolidação, de propósito (CLAUDE.md, seção 5).
+
+    `censoring_flags` (Sprint 24, 24.4; colunas `date`, `is_censored` deste
+    item): tira os dias de ruptura provável do histórico de PREVISÃO, tanto no
+    `Simulator` do run parcial quanto no `fit` explícito de `as_of` abaixo --
+    os dois precisam concordar. `_trailing_avg_daily_demand` NÃO é censurada:
+    mede demanda observada recente para cobertura em dias, não prevê.
     """
     forecaster = StatisticalForecaster(
         level_window_weeks=cell_params.forecast_statistical.level_window_weeks,
@@ -401,6 +409,7 @@ def _decide_item(
         start=cell_params.simulation.start_date,
         warmup_days=cell_params.simulation.warmup_days,
         quantiles=cell_params.model.quantiles,
+        censoring_flags=censoring_flags,
     )
     events = simulator.run(cell_params.simulation.start_date, as_of - timedelta(days=1))
     on_hand, in_transit = simulator.position()
@@ -414,6 +423,8 @@ def _decide_item(
     recent_average_purchase = statistics.mean(recent_orders) if recent_orders else 0.0
 
     history = demand.filter(pl.col("date") < as_of)
+    if censoring_flags is not None:
+        history = drop_censored(history, censoring_flags)
     forecaster.fit(history, as_of=as_of)
     forecast = forecaster.predict_quantiles(
         as_of, lead_time_days + review_period_days, [ARM2_CHOSEN_ALPHA]
@@ -448,7 +459,13 @@ class _ItemDecisions:
 
 
 def _decide_all_items(
-    item_supplier: pl.DataFrame, *, sales_subset: pl.DataFrame, cell_params: Params, as_of: date
+    item_supplier: pl.DataFrame,
+    *,
+    sales_subset: pl.DataFrame,
+    cell_params: Params,
+    as_of: date,
+    store_id: str,
+    censoring_flags: pl.DataFrame | None = None,
 ) -> _ItemDecisions:
     """Roda `_decide_item` para cada linha de `item_supplier` (item + dados
     de fornecedor já resolvidos por join) e agrega os resultados por item_id."""
@@ -495,6 +512,11 @@ def _decide_all_items(
             cell_params=cell_params,
             as_of=as_of,
             variation_lookback_days=lookback_days,
+            censoring_flags=(
+                flags_for_item(censoring_flags, store_id, item_id)
+                if censoring_flags is not None
+                else None
+            ),
         )
         decisions.desired[item_id] = raw_quantity
         decisions.on_hand[item_id] = on_hand
@@ -809,8 +831,19 @@ def generate_purchase_list(
         .collect()
     )
 
+    # Censura (Sprint 24, 24.4): flags calculadas uma vez, `None` com `censura.ativa: false`.
+    censoring_flags = flags_if_active(
+        sales_subset.with_columns(pl.lit(subset.store_id).alias("store_id")),
+        None,
+        cell_params.mercado_piloto.censura,
+    )
     decisions = _decide_all_items(
-        item_supplier, sales_subset=sales_subset, cell_params=cell_params, as_of=as_of
+        item_supplier,
+        sales_subset=sales_subset,
+        cell_params=cell_params,
+        as_of=as_of,
+        store_id=subset.store_id,
+        censoring_flags=censoring_flags,
     )
     is_new = _classify_new_items(decisions, cell_params, as_of)
     final_desired, guardrail_flags = _apply_item_level_guardrails(

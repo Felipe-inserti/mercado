@@ -28,6 +28,7 @@ from motor.reporting.purchase_list import (
     _classify_new_items,
     _coverage_days,
     _cycle_budget_rs,
+    _decide_item,
     _finalize_with_cash_constraint,
     _first_sale_and_days_with_sales,
     _ItemDecisions,
@@ -651,3 +652,36 @@ def test_finalize_with_cash_constraint_piso_estoura_orcamento_gera_alerta() -> N
     assert alert.total_floor_rs == 1100.0
     assert alert.budget_rs == 800.0
     assert alert.shortfall_rs == 300.0
+
+
+@pytest.mark.xfail(
+    strict=True,
+    raises=ValueError,
+    reason=(
+        "Bug conhecido (Sprint 24, pendência obrigatória antes do piloto): "
+        "iso_service.ARM2_CHOSEN_ALPHA = 0.66 não está em model.quantiles do params.yaml "
+        "atual ([0.5, 0.7, 0.8, 0.85, 0.9, 0.95]), então a decisão por item da lista de "
+        "compra levanta ValueError (alpha fora da grade de quantis). Quando for "
+        "corrigido, este teste passa e o strict=True o derruba: remover o xfail."
+    ),
+)
+def test_decisao_por_item_da_lista_de_compra_com_params_atual_levanta_value_error(
+    cell_params,
+) -> None:
+    """Chama a decisão por item da lista de compra (`_decide_item`, o passo que
+    `generate_purchase_list` repete para cada item) com o `params.yaml` ATUAL,
+    sem alterar a grade de quantis. `generate_purchase_list` inteiro exige
+    `data/` e rodaria o mesmo `_decide_item` -- este teste exercita o ponto de
+    falha sem o custo."""
+    start = cell_params.simulation.start_date
+    as_of = start + timedelta(days=100)
+    days = [start - timedelta(days=120) + timedelta(days=i) for i in range(220)]
+    demand = pl.DataFrame({"date": days, "units_sold": [10.0] * len(days)})
+    _decide_item(
+        lead_time_days=2,
+        review_period_days=7,
+        demand=demand,
+        cell_params=cell_params,
+        as_of=as_of,
+        variation_lookback_days=90,
+    )

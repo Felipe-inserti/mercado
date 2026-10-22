@@ -38,6 +38,11 @@ from motor.assumptions import AssumptionsRegistry, build_assumptions_registry
 from motor.config import ExperimentArmParams, Params, load_params
 from motor.experiments.shared import build_simulator_for_pair
 from motor.features.calendar import StoreLocale, load_holidays, load_store_locale
+from motor.features.censoring import (
+    censoring_summary,
+    flags_for_item,
+    flags_if_active,
+)
 from motor.forecast.base import Forecaster
 from motor.forecast.naive import NaiveForecaster
 from motor.forecast.quantile_gbm import (
@@ -217,6 +222,7 @@ def _build_quantile_gbm_registry(
     calendar_locale: StoreLocale,
     holidays: pl.DataFrame,
     params: Params,
+    censoring_flags: pl.DataFrame | None = None,
 ) -> tuple[QuantileModelRegistry, pl.DataFrame, dict[str, dict[date, dict[float, float]]]]:
     """Treina o modelo GLOBAL do braço 3 UMA VEZ, fora do loop por item (ver
     docstring de `motor.forecast.quantile_gbm`) -- `run_arm` chama isto antes
@@ -242,6 +248,7 @@ def _build_quantile_gbm_registry(
         store_id=store_id,
         item_ids=item_ids,
         horizon_by_item=horizon_by_item,
+        censoring=params.mercado_piloto.censura if censoring_flags is not None else None,
     )
     registry = train_quantile_models(
         sales_full_subset,
@@ -259,6 +266,7 @@ def _build_quantile_gbm_registry(
         hyperparams=params.quantile_gbm,
         cache_dir=Path(params.quantile_gbm.model_cache_dir),
         config_hash=config_hash,
+        censoring_flags=censoring_flags,
     )
     # decision_dates == retrain_dates: mesmo período (model.retrain_cadence_days
     # == review_period_days neste subconjunto) e mesma referência
@@ -278,6 +286,7 @@ def _build_quantile_gbm_registry(
         calendar_locale=calendar_locale,
         holidays=holidays,
         registry=registry,
+        censoring_flags=censoring_flags,
     )
     return registry, sales_full_subset, predictions
 
@@ -329,6 +338,9 @@ class ArmRunResult:
     contador de correção de não-cruzamento (`registry.correction`), lido por
     `_build_manifest`. `None` para os outros braços: não treinamos um modelo
     global só para alimentar um contador que nem existiria."""
+    censoring_summary: pl.DataFrame | None = None
+    """Dias marcados por item e total (`censoring_summary`, Sprint 24); `None`
+    com `censura.ativa: false`."""
 
 
 def _events_to_dataframe(*, store_id: str, item_id: str, events: Sequence[object]) -> pl.DataFrame:
@@ -414,6 +426,22 @@ def run_arm(
         for item_id in item_ids
     }
 
+    # Censura de ruptura provável (Sprint 24, 24.4): calculada UMA vez, aqui, e
+    # passada para dentro. Só altera o histórico que alimenta a previsão; o
+    # atendimento do Simulator segue lendo a demanda real. `entries`/`stock` =
+    # None: o Favorita não os tem (a regra roda sem a condição de entrada).
+    censoring_params = params.mercado_piloto.censura
+    censoring_flags = flags_if_active(
+        sales_subset.with_columns(pl.lit(subset.store_id).alias("store_id")),
+        None,
+        censoring_params,
+    )
+    censoring_report = (
+        censoring_summary(censoring_flags, censoring_params)
+        if censoring_flags is not None
+        else None
+    )
+
     quantile_gbm_registry: QuantileModelRegistry | None = None
     quantile_gbm_predictions: dict[str, dict[date, dict[float, float]]] | None = None
     if arm.forecaster == "quantile_gbm":
@@ -431,6 +459,7 @@ def run_arm(
                 calendar_locale=calendar_locale,
                 holidays=holidays,
                 params=params,
+                censoring_flags=censoring_flags,
             )
         )
 
@@ -466,6 +495,11 @@ def run_arm(
             start=params.simulation.start_date,
             warmup_days=params.simulation.warmup_days,
             quantiles=params.model.quantiles,
+            censoring_flags=(
+                flags_for_item(censoring_flags, subset.store_id, item_id)
+                if censoring_flags is not None
+                else None
+            ),
         )
         events = simulator.run(params.simulation.start_date, params.simulation.end_date)
         event_frames.append(
@@ -504,6 +538,7 @@ def run_arm(
         store_id=subset.store_id,
         item_ids=subset.item_ids,
         quantile_gbm_registry=quantile_gbm_registry,
+        censoring_summary=censoring_report,
     )
 
 

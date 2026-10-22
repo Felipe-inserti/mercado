@@ -149,6 +149,39 @@ STOCK_PRIMARY_KEY: Final = ("store_id", "item_id", "date")
 
 
 # --------------------------------------------------------------------------
+# entries
+# --------------------------------------------------------------------------
+
+
+class Entry(TableRow):
+    """Uma entrada (recebimento) de mercadoria no grão loja x item x recebimento.
+
+    Quinta tabela de entrada, OPCIONAL como `stock` (o Favorita não a tem):
+    existe para a censura de ruptura provável (`motor.features.censoring`), que
+    desconfia de um dia de venda zero só se o item NÃO recebeu mercadoria
+    nos dias anteriores.
+
+    `quantity` é estritamente positiva: devolução ao fornecedor ou estorno não
+    é entrada. `order_date` e `supplier_id` são nuláveis porque nem todo ERP os
+    registra no recebimento.
+
+    Sem chave primária (`ENTRIES_PRIMARY_KEY` vazia): dois recebimentos do
+    mesmo item no mesmo dia (duas cargas, dois pedidos) são normais e
+    legítimos -- rejeitar como duplicata esconderia dado real.
+    """
+
+    store_id: str
+    item_id: str
+    received_date: date
+    quantity: PositiveFloat
+    order_date: date | None = None
+    supplier_id: str | None = None
+
+
+ENTRIES_PRIMARY_KEY: Final[tuple[str, ...]] = ()
+
+
+# --------------------------------------------------------------------------
 # items
 # --------------------------------------------------------------------------
 
@@ -591,7 +624,7 @@ def _constraint_violations(
 def _primary_key_violation(
     df: pl.DataFrame, primary_key: Sequence[str], present_cols: set[str]
 ) -> Violation | None:
-    if not set(primary_key) <= present_cols:
+    if not primary_key or not set(primary_key) <= present_cols:
         return None
     dup_counts = df.group_by(list(primary_key)).len().filter(pl.col("len") > 1)
     if dup_counts.height == 0:

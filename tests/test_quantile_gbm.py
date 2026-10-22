@@ -16,6 +16,7 @@ import pytest
 
 import motor.forecast.quantile_gbm as qgbm_module
 from motor.config import (
+    CensuraParams,
     FeatureCalendarParams,
     FeatureHistoricoParams,
     FeaturesParams,
@@ -839,3 +840,35 @@ def test_quantile_gbm_forecaster_so_consulta_o_precomputado_nunca_calcula() -> N
     fc.fit(historico_vazio, outro_as_of)
     with pytest.raises(ValueError, match="nenhuma previsão pré-computada"):
         fc.predict_quantiles(outro_as_of, 7, quantiles)
+
+
+def test_compute_config_hash_censura_desligada_nao_muda_o_hash_e_ligada_muda(
+    tmp_path: Path,
+) -> None:
+    """Sprint 24, 24.4c: com a censura LIGADA o treino vê outras features, então
+    os limiares entram na chave de cache; DESLIGADA (`None`) o hash é o de antes,
+    byte a byte -- o cache existente do Favorita continua válido."""
+    common_kwargs = {
+        "hyperparams": _hyperparams(tmp_path / "cache"),
+        "features_params": _features_params(),
+        "quantiles": [0.5, 0.9],
+        "store_id": _STORE,
+        "item_ids": ["i0", "i1"],
+        "horizon_by_item": {"i0": 10, "i1": 10},
+    }
+
+    def censoring(mean: float) -> CensuraParams:
+        return CensuraParams(
+            ativa=True,
+            janela_dias=28,
+            media_minima_por_dia=mean,
+            dias_minimos_com_venda=10,
+            dias_sem_entrada_antes=3,
+            alerta_percentual_dias_censurados=0.15,
+        )
+
+    sem_censura = compute_config_hash(**common_kwargs)
+    assert compute_config_hash(censoring=None, **common_kwargs) == sem_censura
+    com_censura = compute_config_hash(censoring=censoring(1.0), **common_kwargs)
+    assert com_censura != sem_censura
+    assert compute_config_hash(censoring=censoring(2.0), **common_kwargs) != com_censura

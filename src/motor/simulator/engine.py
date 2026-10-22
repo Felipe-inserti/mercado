@@ -20,6 +20,7 @@ from datetime import date, timedelta
 
 import polars as pl
 
+from motor.features.censoring import drop_censored
 from motor.forecast.base import Forecaster
 from motor.inventory import InventoryState
 from motor.policy.base import DecisionContext, Policy
@@ -104,6 +105,7 @@ class Simulator:
         quantiles: list[float],
         is_review_day: Callable[[date], bool],
         shelf_life_from_arrival_days: int | None,
+        censoring_flags: pl.DataFrame | None = None,
     ) -> None:
         """
         `demand`: tabela verdade com colunas `date`, `units_sold` -- a
@@ -118,6 +120,12 @@ class Simulator:
         de chegar ao ponto de recebimento; sem dado de fabricação, esta é a
         premissa mais simples que se pode declarar de forma explícita, em
         vez de escondê-la atrás de um cálculo qualquer.
+
+        `censoring_flags` (Sprint 24, 24.4): colunas `date`, `is_censored` DESTE
+        par (`motor.features.censoring.flags_for_item`). Só `_decide` as usa,
+        para tirar os dias de ruptura provável do histórico entregue ao
+        forecaster; `_demand_by_day` (atendimento, `demand`, `unmet_demand`)
+        nunca as vê. `None` = comportamento anterior, byte a byte.
         """
         self._state = state
         self._forecaster = forecaster
@@ -131,6 +139,7 @@ class Simulator:
         self._quantiles = quantiles
         self._is_review_day = is_review_day
         self._shelf_life_from_arrival_days = shelf_life_from_arrival_days
+        self._censoring_flags = censoring_flags
 
     def position(self) -> tuple[float, float]:
         """`(em_mãos, em_trânsito)` no estado atual -- leitura pública,
@@ -192,6 +201,8 @@ class Simulator:
     def _decide(self, day: date) -> float:
         """Monta o `DecisionContext`, chama a política e agenda o pedido, se houver."""
         history = self._demand_table.filter(pl.col("date") < day)
+        if self._censoring_flags is not None:
+            history = drop_censored(history, self._censoring_flags)
         self._forecaster.fit(history, as_of=day)
         forecast = self._forecaster.predict_quantiles(day, self._horizon_days, self._quantiles)
 

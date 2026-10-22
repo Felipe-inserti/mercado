@@ -432,3 +432,79 @@ def test_active_features_com_nome_desconhecido_levanta_erro_claro() -> None:
             params=params,
             item_ids=["reg"],
         )
+
+
+# -- censura de ruptura provável (Sprint 24, 24.4c) ---------------------------
+
+
+def _sales_with_zero_day_for_reg(zero_day: date) -> pl.DataFrame:
+    return _build_synthetic_sales().with_columns(
+        pl.when((pl.col("item_id") == "reg") & (pl.col("date") == zero_day))
+        .then(0.0)
+        .otherwise(pl.col("units_sold"))
+        .alias("units_sold")
+    )
+
+
+def _flags(marked_day: date) -> pl.DataFrame:
+    return pl.DataFrame(
+        {
+            "store_id": [_STORE],
+            "item_id": ["reg"],
+            "date": [marked_day],
+            "is_censored": [True],
+            "reason": ["sem_entrada_recente"],
+        }
+    )
+
+
+def test_build_features_com_censura_ignora_o_dia_marcado_nas_features_de_historico() -> None:
+    zero_day = _AS_OF - timedelta(days=1)
+    sales = _sales_with_zero_day_for_reg(zero_day)
+
+    def row(flags: pl.DataFrame | None) -> dict[str, object]:
+        out = build_features(
+            sales,
+            _items(),
+            _AS_OF,
+            store_id=_STORE,
+            calendar=_calendar_for(_AS_OF),
+            params=_params(),
+            item_ids=["reg"],
+            censoring_flags=flags,
+        )
+        return out.to_dicts()[0]
+
+    plain = row(None)
+    censored = row(_flags(zero_day))
+
+    assert plain["lag_units_1"] == 0.0
+    assert plain["rolling_mean_units_7d"] == pytest.approx(60.0 / 7)
+    # Dia removido: o lag aponta para um dia que não existe mais (nulo, não zero)
+    # e a média da janela passa a ser a dos 6 dias restantes.
+    assert censored["lag_units_1"] is None
+    assert censored["rolling_mean_units_7d"] == pytest.approx(10.0)
+
+
+def test_build_features_com_flags_vazias_ou_none_e_identico() -> None:
+    sales = _build_synthetic_sales()
+    base = _build(sales, _AS_OF)
+    empty = pl.DataFrame(
+        schema={
+            "store_id": pl.String,
+            "item_id": pl.String,
+            "date": pl.Date,
+            "is_censored": pl.Boolean,
+            "reason": pl.String,
+        }
+    )
+    with_empty = build_features(
+        sales,
+        _items(),
+        _AS_OF,
+        store_id=_STORE,
+        calendar=_calendar_for(_AS_OF),
+        params=_params(),
+        censoring_flags=empty,
+    )
+    assert with_empty.equals(base)

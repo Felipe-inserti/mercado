@@ -104,14 +104,14 @@ A mudança de maior efeito no resultado. Pode ser dividida em três sessões (24
 
 **24.4b — `src/motor/features/censoring.py`.**
 
-- `flag_probable_stockout(sales, entries: pl.DataFrame | None, stock: pl.DataFrame | None, params) -> pl.DataFrame` → colunas `store_id`, `item_id`, `date`, `is_censored`, `reason`.
+- `flag_probable_stockout(sales, entries: pl.DataFrame | None, params) -> pl.DataFrame` → colunas `store_id`, `item_id`, `date`, `is_censored`, `reason`.
 - Um dia é marcado quando, ao mesmo tempo:
   - venda do dia = 0;
   - média dos `janela_dias` anteriores ≥ `media_minima_por_dia`;
   - dias com venda nos `janela_dias` anteriores ≥ `dias_minimos_com_venda`;
   - nenhuma entrada do item nos `dias_sem_entrada_antes` dias anteriores.
 - Se `entries is None`: a última condição é ignorada e `reason` registra isso. É o caso do Favorita.
-- Se `stock` existir: saldo zero no dia marca direto (`reason = "saldo_zero"`).
+- Saldo de estoque fica fora até haver dado real com saldo; reabrir com nova conversa (Emenda da Sprint 15 do `CLAUDE.md`: `stock` fora de `motor.features`). Por isso a função não recebe `stock`.
 - A janela olha só o passado do dia (sem vazamento).
 - `drop_censored(history, flags) -> pl.DataFrame` remove as linhas marcadas.
 - `censoring_summary(flags) -> pl.DataFrame`: dias marcados por item e total, com alerta acima de `alerta_percentual_dias_censurados`.
@@ -133,7 +133,6 @@ Antes de editar: `grep -rn 'pl.col("date") <' src/` e listar todo ponto encontra
 - mesmo zero com entrada nos 3 dias anteriores → não marcado;
 - item intermitente → nenhum dia marcado;
 - `entries=None` → regra aplicada sem a condição de entrada, `reason` diz isso;
-- saldo zero em `stock` → marcado com `reason = "saldo_zero"`;
 - flags vazias → `drop_censored` devolve o histórico idêntico;
 - simulador com censura ligada: demanda e `unmet_demand` registradas iguais às de sem censura; só o pedido pode mudar;
 - `purchase_list` com censura ligada usa histórico censurado.
@@ -185,7 +184,7 @@ Roda sobre as tabelas canônicas, então não depende do formato do mercado.
   3. motor atual (braço 2, `forecast/statistical.py`).
 - Classe de demanda (regular, intermitente, errática) calculada **só com dado anterior à janela de teste**.
 - Métricas da 24.2 por método × classe, com os dias censurados da janela de teste excluídos pela máscara.
-- Saída em `results/piloto/`: tabela (uma linha por método × classe), resumo da censura e manifesto com hashes dos insumos, `params.yaml` e commit.
+- Saída em `results/piloto/`: tabela (uma linha por método × classe), `censoring_summary` gravado na saída do backtest (dias marcados por item e total, com alerta; ausente com `censura.ativa: false`), e manifesto com hashes dos insumos, `params.yaml` e commit.
 
 **Testes:** ponta a ponta com dado sintético pequeno — os três métodos rodam na mesma janela; uma linha por método × classe; rodar duas vezes gera bytes idênticos.
 
@@ -198,6 +197,11 @@ Roda sobre as tabelas canônicas, então não depende do formato do mercado.
 - Emenda datada no `CLAUDE.md`: módulos novos (`censoring`, `forecast_quality`, `naive_seasonal`, `quality_report`, `piloto_backtest`), o contrato `Entry`, a mudança do braço 1 e a regra "censura só no histórico de previsão". Não apagar emendas antigas.
 - Lista de decisões em aberto (os `null`) num lugar só, com o que é preciso para fechar cada uma.
 - Anotar número de testes e cobertura finais ao lado dos da 24.0.
+
+### Pendências antes do piloto
+
+- **[OBRIGATÓRIA] `ARM2_CHOSEN_ALPHA` fora da grade de quantis.** `experiments/iso_service.py` define `ARM2_CHOSEN_ALPHA = 0.66`, que não está em `model.quantiles` do `params.yaml` (`[0.5, 0.7, 0.8, 0.85, 0.9, 0.95]`). A decisão por item da lista de compra (`reporting/purchase_list.py::_decide_item`) levanta `ValueError` (alpha fora da grade) com o `params.yaml` atual, então a lista de compra não roda. Não corrigido na Sprint 24, por decisão explícita. Registrado em `tests/test_purchase_list.py` por um teste `xfail(strict=True)`: quando o bug for corrigido o teste passa, o `strict` o derruba, e o `xfail` deve ser removido.
+- Alvo de treino do GBM (braço 3) não é censurado; fora da v1.
 
 ---
 

@@ -64,7 +64,7 @@ import lightgbm as lgb
 import numpy as np
 import polars as pl
 
-from motor.config import FeaturesParams, QuantileGbmParams
+from motor.config import CensuraParams, FeaturesParams, QuantileGbmParams
 from motor.features.build import build_features, build_training_matrix
 from motor.features.calendar import StoreLocale, build_calendar_features
 from motor.forecast.base import risk_window_bounds
@@ -224,6 +224,7 @@ def compute_config_hash(
     store_id: str,
     item_ids: Sequence[str],
     horizon_by_item: Mapping[str, int],
+    censoring: CensuraParams | None = None,
 ) -> str:
     """Hash determinístico de TUDO que afeta o resultado do treino -- a chave
     de cache inclui isto, não só a data de retreino (a forma mais fácil de
@@ -238,7 +239,13 @@ def compute_config_hash(
     `lead_time` diferente (portanto horizonte diferente) mas mesmo
     `store_id`/`item_ids`/`quantiles`/hiperparâmetros colidiam no mesmo
     diretório de cache -- exatamente o cenário de uma varredura de
-    sensibilidade em `lead_time` (Sprint 16)."""
+    sensibilidade em `lead_time` (Sprint 16).
+
+    `censoring` (Sprint 24, 24.4): com a censura LIGADA, as features de treino
+    mudam, então os limiares entram na chave; com ela desligada (`None`) o
+    payload é o de antes e o hash, byte a byte, o mesmo -- o cache existente
+    continua válido. Só os parâmetros entram: se `entries`/`stock` mudarem, o
+    chamador precisa trocar o diretório de cache."""
     payload = {
         "quantile_gbm": hyperparams.model_dump(mode="json", exclude={"model_cache_dir"}),
         "features": features_params.model_dump(mode="json"),
@@ -247,6 +254,8 @@ def compute_config_hash(
         "item_ids": sorted(item_ids),
         "horizon_by_item": dict(sorted(horizon_by_item.items())),
     }
+    if censoring is not None:
+        payload["censoring"] = censoring.model_dump(mode="json")
     encoded = json.dumps(payload, sort_keys=True).encode("utf-8")
     return hashlib.sha256(encoded).hexdigest()
 
@@ -359,6 +368,7 @@ def train_quantile_models(
     hyperparams: QuantileGbmParams,
     cache_dir: Path,
     config_hash: str,
+    censoring_flags: pl.DataFrame | None = None,
 ) -> QuantileModelRegistry:
     """Treina (ou carrega do cache) um `QuantileBoosterSet` por data em
     `retrain_dates`. Janela de treino EXPANSIVA: a cada retreino, usa toda
@@ -403,6 +413,7 @@ def train_quantile_models(
                 holidays=holidays,
                 params=features_params,
                 item_ids=item_ids,
+                censoring_flags=censoring_flags,
             )
             targets = pl.concat(
                 [
@@ -489,6 +500,7 @@ def precompute_predictions(
     calendar_locale: StoreLocale,
     holidays: pl.DataFrame,
     registry: QuantileModelRegistry,
+    censoring_flags: pl.DataFrame | None = None,
 ) -> dict[str, dict[date, dict[float, float]]]:
     """Pré-computa TODA previsão que o braço 3 vai pedir durante a simulação
     -- uma por (item_id, as_of) em `item_ids` x `decision_dates` -- ANTES do
@@ -564,6 +576,7 @@ def precompute_predictions(
                 calendar=calendar,
                 params=features_params,
                 item_ids=[item_id],
+                censoring_flags=censoring_flags,
             ).with_columns(pl.lit(horizon_by_item[item_id]).alias(RISK_WINDOW_FEATURE))
             rows.append(row)
         stacked = pl.concat(rows)
