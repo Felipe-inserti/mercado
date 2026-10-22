@@ -1044,8 +1044,7 @@ def main(argv: Sequence[str] | None = None) -> None:
         "--force",
         action="store_true",
         help=(
-            "sobrescreve --results-dir/--arm/manifest.json se já existir "
-            "(ver ExistingResultError)"
+            "sobrescreve --results-dir/--arm/manifest.json se já existir (ver ExistingResultError)"
         ),
     )
     args = parser.parse_args(argv)

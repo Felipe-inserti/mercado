@@ -539,14 +539,11 @@ def test_compute_config_hash_muda_com_horizonte(tmp_path: Path) -> None:
         "item_ids": item_ids,
     }
 
-    hash_horizonte_10 = compute_config_hash(
-        horizon_by_item={"i0": 10, "i1": 10}, **common_kwargs
-    )
-    hash_horizonte_17 = compute_config_hash(
-        horizon_by_item={"i0": 17, "i1": 17}, **common_kwargs
-    )
+    hash_horizonte_10 = compute_config_hash(horizon_by_item={"i0": 10, "i1": 10}, **common_kwargs)
+    hash_horizonte_17 = compute_config_hash(horizon_by_item={"i0": 17, "i1": 17}, **common_kwargs)
     hash_horizonte_10_de_novo = compute_config_hash(
-        horizon_by_item={"i1": 10, "i0": 10}, **common_kwargs  # ordem de inserção trocada
+        horizon_by_item={"i1": 10, "i0": 10},
+        **common_kwargs,  # ordem de inserção trocada
     )
     hash_horizonte_misto = compute_config_hash(
         horizon_by_item={"i0": 10, "i1": 17}, **common_kwargs

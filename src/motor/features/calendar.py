@@ -87,9 +87,11 @@ def load_holidays(raw_parquet_dir: Path) -> pl.DataFrame:
 def _effective_holiday_dates(
     holidays: pl.DataFrame, *, locale: str, locale_name: str | None
 ) -> set[date]:
-    condicao = (pl.col("locale") == locale) & pl.col("type").is_in(
-        list(_EFFECTIVE_HOLIDAY_TYPES)
-    ) & ~((pl.col("type") == "Holiday") & pl.col("transferred"))
+    condicao = (
+        (pl.col("locale") == locale)
+        & pl.col("type").is_in(list(_EFFECTIVE_HOLIDAY_TYPES))
+        & ~((pl.col("type") == "Holiday") & pl.col("transferred"))
+    )
     if locale_name is not None:
         condicao = condicao & (pl.col("locale_name") == locale_name)
     matches = holidays.filter(condicao)
