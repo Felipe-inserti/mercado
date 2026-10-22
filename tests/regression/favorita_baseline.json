@@ -1,0 +1,69 @@
+{
+  "arms": {
+    "erp_baseline": {
+      "n_items": 275,
+      "portfolio": {
+        "capital_medio_rs": 274093.57270607,
+        "carrying_cost_rs": 31201.61081079,
+        "decision_metric": 17.17948929,
+        "giro_anualizado": 78.80822181,
+        "margem_realizada_rs": 4708787.59725572,
+        "nivel_servico": 0.93869149,
+        "perda_rs": 0.0,
+        "ruptura_rs": 322115.61694428
+      },
+      "row_counts": {
+        "events": 100925,
+        "item_metrics": 275
+      }
+    },
+    "estatistico_basestock": {
+      "n_items": 275,
+      "portfolio": {
+        "capital_medio_rs": 436187.06311552,
+        "carrying_cost_rs": 49653.62321219,
+        "decision_metric": 11.26210228,
+        "giro_anualizado": 51.55241857,
+        "margem_realizada_rs": 4912383.31820396,
+        "nivel_servico": 0.97764775,
+        "perda_rs": 0.0,
+        "ruptura_rs": 118519.89599604
+      },
+      "row_counts": {
+        "events": 100925,
+        "item_metrics": 275
+      }
+    }
+  },
+  "canonical_sha256": {
+    "items": "5447cbb965bcfb62c000fd632275f178efdf84aeaac5d1a8c44ed1fa2562edf4",
+    "sales": "1e66b1aee7dae9ca2e88cb438283d821c4f4cf895d757806a6f96dfb4a4872d3",
+    "stock": "4675d0c2080aade092b6674948e5b88c0d7f091472449d041304d99735664234",
+    "suppliers": "1f961eed87e6e3b80f214802bababe1e4e72a1eb282c77ec2f3475f40db472c0"
+  },
+  "git_commit_hash": "859a3feaf2057909e4c1d7217e0343e7e743402c",
+  "params_section_sha256": {
+    "canonical": "838cb71741d533d9be0c7b3613ce79e22c4400470aa058c59ecaea1079e85f4c",
+    "data": "ee60862946efa4af9e8f534d8dcf145800abd2cc1475274c27664161298067a1",
+    "economics": "d487f70e8b106ce125b94a7e34ab5f22a63334602fc80e5e9af33156aa723acd",
+    "erp_baseline": "28160aebe596f87934f252c3c49351c5099c20dbae59f62dbfc6c4d12d80d902",
+    "experiments": "f0dabac14a2794efe20751ea7346162d99de0d0ce839269f7ca4047b62b496e4",
+    "features": "f9733c0ce754f66a72e217961ff11cc96d4d4dc0a523b03ed41523be5a1015de",
+    "forecast_naive": "ac8d7bf7d8fd217660e0782d97913380d404d9267af9ece013a3d7b2154af9c4",
+    "forecast_statistical": "c3e3c4f6b2b3772f72bc2ae9f6d3e4b75624d541c44f045310fb673a7117739f",
+    "guardrails": "b981e40efb1a2952b7acbf7e5d34f3287a7cfbdb3292327a2239723039813636",
+    "model": "9407f2a9e991322e7f267d711b4699d8acb7698cbc5bc5ea575b238ed4de004f",
+    "profiling": "30866e0a0f15644ad5d549c44be36de4a367b3b1ec5eabfffa335929eae58683",
+    "purchase_list_supplier_assumptions": "0e6b581f0bc4c912093322f6bfe75a0f34721d54b216c2c39e1728a8f326c1bc",
+    "quantile_gbm": "f9c1ca60e2beffca6a0f3a12fb8b52f6748920c4fe37d97d094e2be606172629",
+    "simulation": "711e133ac7ca00db547548d1b280cfc40ae5c496e5d8863fa1057cb9c61219d5",
+    "subset_selection": "5ded8b85b4ad2e537a5b0dd7b71afe0d5e50f75135be5e28ebfaa8ca7117993b",
+    "supplier_assumptions": "feb4b1e239181560102b1a1a12b0a150bc1039697e3deabb2f8f9a76f1440c1b",
+    "supplier_order_policy": "2182b9c785c4b33543ed7a2770547868c5ec8118e307901fb08fc94eafcfc48c"
+  },
+  "suite": {
+    "coverage_pct": 76,
+    "tests_passed": 368,
+    "tests_skipped": 0
+  }
+}

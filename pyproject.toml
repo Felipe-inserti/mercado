@@ -87,7 +87,10 @@ ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "--strict-markers --strict-config --cov=motor --cov-report=term-missing"
+addopts = "--strict-markers --strict-config -m 'not regression' --cov=motor --cov-report=term-missing"
+markers = [
+    "regression: regressão do Favorita contra a referência congelada (lenta, exige data/ e results/baseline_sprint24/); fora do pytest padrão, rodar com -m regression",
+]
 
 [tool.coverage.run]
 source = ["src/motor"]
