@@ -11,10 +11,12 @@ import polars as pl
 import pytest
 
 from motor.io.contracts import (
+    ENTRIES_PRIMARY_KEY,
     ITEMS_PRIMARY_KEY,
     SALES_PRIMARY_KEY,
     STOCK_PRIMARY_KEY,
     SUPPLIERS_PRIMARY_KEY,
+    Entry,
     Item,
     Sale,
     SchemaValidationError,
@@ -334,3 +336,66 @@ class TestConsistenciaCadenciaFornecedor:
         """review_period_days == max_gap é suficiente, não precisa sobrar folga."""
         df = valid_suppliers().with_columns(pl.Series("review_period_days", [4]))
         validate_supplier_order_cadence(df)
+
+
+# --------------------------------------------------------------------------
+# entries (Sprint 24, 24.4a)
+# --------------------------------------------------------------------------
+
+
+def valid_entries() -> pl.DataFrame:
+    return pl.DataFrame(
+        {
+            "store_id": ["1", "1"],
+            "item_id": ["A", "A"],
+            "received_date": [date(2024, 1, 3), date(2024, 1, 3)],
+            "quantity": [12.0, 6.0],
+            "order_date": [date(2024, 1, 1), None],
+            "supplier_id": ["S1", None],
+        }
+    )
+
+
+class TestEntries:
+    def test_entries_valido_passa(self) -> None:
+        validate_table(
+            valid_entries(), Entry, table_name="entries", primary_key=ENTRIES_PRIMARY_KEY
+        )
+
+    def test_duas_entradas_do_mesmo_item_no_mesmo_dia_sao_legitimas(self) -> None:
+        # valid_entries() já tem duas linhas A / 2024-01-03: não é chave duplicada.
+        df = valid_entries()
+        assert df.select(pl.struct("item_id", "received_date").n_unique()).item() == 1
+        validate_table(df, Entry, table_name="entries", primary_key=ENTRIES_PRIMARY_KEY)
+
+    def test_colunas_opcionais_podem_ser_omitidas_como_nulo(self) -> None:
+        df = valid_entries().with_columns(
+            pl.lit(None, dtype=pl.Date).alias("order_date"),
+            pl.lit(None, dtype=pl.String).alias("supplier_id"),
+        )
+        validate_table(df, Entry, table_name="entries", primary_key=ENTRIES_PRIMARY_KEY)
+
+    @pytest.mark.parametrize("bad_quantity", [0.0, -3.0])
+    def test_quantity_precisa_ser_positiva(self, bad_quantity: float) -> None:
+        df = valid_entries().with_columns(pl.Series("quantity", [12.0, bad_quantity]))
+        with pytest.raises(SchemaValidationError) as exc_info:
+            validate_table(df, Entry, table_name="entries", primary_key=ENTRIES_PRIMARY_KEY)
+        message = str(exc_info.value)
+        assert "quantity" in message
+        assert str(bad_quantity) in message
+
+    def test_received_date_nao_pode_ser_nulo(self) -> None:
+        df = valid_entries().with_columns(
+            pl.Series("received_date", [date(2024, 1, 3), None], dtype=pl.Date)
+        )
+        with pytest.raises(SchemaValidationError) as exc_info:
+            validate_table(df, Entry, table_name="entries", primary_key=ENTRIES_PRIMARY_KEY)
+        message = str(exc_info.value)
+        assert "received_date" in message
+        assert "nulos não permitidos" in message
+
+    def test_coluna_faltando_e_rejeitada(self) -> None:
+        df = valid_entries().drop("quantity")
+        with pytest.raises(SchemaValidationError) as exc_info:
+            validate_table(df, Entry, table_name="entries", primary_key=ENTRIES_PRIMARY_KEY)
+        assert "quantity" in str(exc_info.value)

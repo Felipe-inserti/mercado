@@ -38,8 +38,9 @@ from statistics import mean
 import polars as pl
 
 from motor.experiments.shared import build_simulator_for_pair
+from motor.features.censoring import drop_censored
 from motor.forecast.naive import NaiveForecaster
-from motor.policy.erp_baseline import ErpBaselinePolicy
+from motor.policy.erp_baseline import ErpBaselinePolicy, daily_average_from_history
 from motor.simulator.engine import review_every_n_days
 
 
@@ -56,6 +57,7 @@ class CalibrationItem:
     demand: pl.DataFrame  # colunas: date, units_sold
     lead_time_days: int
     review_period_days: int
+    censoring_flags: pl.DataFrame | None = None  # colunas: date, is_censored (Sprint 24)
 
 
 @dataclass(frozen=True)
@@ -122,11 +124,14 @@ def _precompute_forecasts(
     moving_average_weeks: int,
     min_residual_samples: int,
     quantiles: list[float],
+    censoring_flags: pl.DataFrame | None = None,
 ) -> dict[date, pl.DataFrame]:
     forecaster = NaiveForecaster(moving_average_weeks, min_residual_samples)
     cache: dict[date, pl.DataFrame] = {}
     for as_of in _review_dates(start, end, review_period_days):
         history = demand.filter(pl.col("date") < as_of)
+        if censoring_flags is not None:
+            history = drop_censored(history, censoring_flags)
         forecaster.fit(history, as_of=as_of)
         cache[as_of] = forecaster.predict_quantiles(as_of, horizon_days, quantiles)
     return cache
@@ -150,10 +155,11 @@ def _run_one_combination(
     on_hand_values: list[float] = []
 
     for item in items:
-        horizon_days = item.lead_time_days + item.review_period_days
         forecaster = _PrecomputedForecaster(forecast_cache_by_item[item.item_id])
         policy = ErpBaselinePolicy(
-            horizon_days=horizon_days,
+            daily_average=daily_average_from_history(
+                item.demand, moving_average_weeks, item.censoring_flags
+            ),
             moving_average_weeks=moving_average_weeks,
             factor=factor,
             min_order_units=min_order_units,
@@ -233,6 +239,7 @@ def sweep_erp_baseline(
             moving_average_weeks=moving_average_weeks,
             min_residual_samples=min_residual_samples,
             quantiles=quantiles,
+            censoring_flags=item.censoring_flags,
         )
         for item in items
     }

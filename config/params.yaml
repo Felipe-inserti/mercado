@@ -148,7 +148,10 @@ erp_baseline:
   # medida que justifique um valor > 0; um piso "de bom senso" sem essa
   # medição teria sido exatamente o número mágico que a sprint pediu pra
   # evitar.
-  factor: 0.34
+  # recalibrado na Sprint 24.5 (mu = média móvel pura, sem resíduo do naive): menor
+  # fator com nível de serviço ≥ 95% (95,01%); 0,34 dava 96,47%. Recalibrar sempre
+  # que o dado ou a censura mudarem.
+  factor: 0.32
   min_order_units: 0.0
 
   # CHECK 2 da revisão -- o que factor=0.34 significa em dias de cobertura:
@@ -563,3 +566,23 @@ canonical:
       start: 2016-04-16 # medido: volume diário nacional sobe de ~650-700k/dia para pico de 1,35M em 2016-04-18
       end: 2016-04-24 # medido: volume diário nacional volta à faixa de base (~680k) em 2016-04-25
       reason: "Terremoto M7.8 no Equador em 16/04/2016; pico de compra de emergência em 49 das 54 lojas"
+
+mercado_piloto:
+  # Sprint 24: preparação para o dado real do mercado piloto. Valor `null` = depende do
+  # dado real e NÃO pode ser chutado aqui; quem o usa falha com o nome da chave.
+  censura:
+    ativa: false # desligada por padrão: liga sem mexer em código
+    janela_dias: 28 # arbitrado: 4 semanas completas, cobre o ciclo semanal sem misturar regime velho
+    media_minima_por_dia: null # decidir com o dado real
+    dias_minimos_com_venda: null # decidir com o dado real
+    dias_sem_entrada_antes: 3 # arbitrado
+    alerta_percentual_dias_censurados: 0.15 # arbitrado
+  qualidade:
+    limite_percentual_critico: 0.02 # arbitrado
+    cadastro_minimo_completo: 0.90 # arbitrado
+    janela_regularidade_dias: 28 # arbitrado
+    percentual_dias_com_venda_regular: 0.80 # arbitrado
+    janela_devolucao_dias: 28 # arbitrado: devolução sem nenhuma venda do item nos 28 dias anteriores é suspeita
+  avaliacao:
+    janela_teste_semanas: null # decidir com a dona: 8 a 12
+    quantis_cobertura: [0.8, 0.9, 0.95] # arbitrado: model.quantiles não tem quantil abaixo da mediana, então a cobertura é unilateral (real <= quantil previsto)

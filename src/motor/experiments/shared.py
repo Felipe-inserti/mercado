@@ -73,6 +73,7 @@ def build_simulator_for_pair(
     start: date,
     warmup_days: int,
     quantiles: list[float],
+    censoring_flags: pl.DataFrame | None = None,
 ) -> Simulator:
     """Monta o `Simulator` de um par loja-item com as premissas compartilhadas
     desta sprint (ver docstring do módulo).
@@ -81,6 +82,11 @@ def build_simulator_for_pair(
     será simulado -- histórico anterior a `start`, se existir, deve estar
     incluído também: é dele que `Simulator._decide` monta o `history` (já
     filtrado por `date < as_of`) que o forecaster recebe em `fit`.
+
+    `censoring_flags`: ver `Simulator.__init__`; só altera o histórico de
+    previsão, nunca o atendimento. `initial_stock_units` continua lendo a
+    demanda real do warmup (constante experimental, não previsão -- por isso
+    não censurada).
     """
     horizon_days = lead_time_days + review_period_days
     initial_stock = initial_stock_units(
@@ -107,4 +113,5 @@ def build_simulator_for_pair(
         quantiles=quantiles,
         is_review_day=is_review_day,
         shelf_life_from_arrival_days=None,
+        censoring_flags=censoring_flags,
     )
