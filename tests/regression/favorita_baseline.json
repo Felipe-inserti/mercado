@@ -3,14 +3,14 @@
     "erp_baseline": {
       "n_items": 275,
       "portfolio": {
-        "capital_medio_rs": 274093.57270607,
-        "carrying_cost_rs": 31201.61081079,
-        "decision_metric": 17.17948929,
-        "giro_anualizado": 78.80822181,
-        "margem_realizada_rs": 4708787.59725572,
-        "nivel_servico": 0.93869149,
+        "capital_medio_rs": 250158.04613245,
+        "carrying_cost_rs": 28476.8953885,
+        "decision_metric": 18.57922034,
+        "giro_anualizado": 85.19982663,
+        "margem_realizada_rs": 4647741.458632,
+        "nivel_servico": 0.92627337,
         "perda_rs": 0.0,
-        "ruptura_rs": 322115.61694428
+        "ruptura_rs": 383161.755568
       },
       "row_counts": {
         "events": 100925,
@@ -41,12 +41,12 @@
     "stock": "4675d0c2080aade092b6674948e5b88c0d7f091472449d041304d99735664234",
     "suppliers": "1f961eed87e6e3b80f214802bababe1e4e72a1eb282c77ec2f3475f40db472c0"
   },
-  "git_commit_hash": "859a3feaf2057909e4c1d7217e0343e7e743402c",
+  "git_commit_hash": "d63fbfad3a53ab86cef5186bf12b6ca0077fba27+dirty",
   "params_section_sha256": {
     "canonical": "838cb71741d533d9be0c7b3613ce79e22c4400470aa058c59ecaea1079e85f4c",
     "data": "ee60862946efa4af9e8f534d8dcf145800abd2cc1475274c27664161298067a1",
     "economics": "d487f70e8b106ce125b94a7e34ab5f22a63334602fc80e5e9af33156aa723acd",
-    "erp_baseline": "28160aebe596f87934f252c3c49351c5099c20dbae59f62dbfc6c4d12d80d902",
+    "erp_baseline": "2ae560fb981bcf3f1a442c3507a7195807128bb9816ff3e11b1264e686c5c5f6",
     "experiments": "f0dabac14a2794efe20751ea7346162d99de0d0ce839269f7ca4047b62b496e4",
     "features": "f9733c0ce754f66a72e217961ff11cc96d4d4dc0a523b03ed41523be5a1015de",
     "forecast_naive": "ac8d7bf7d8fd217660e0782d97913380d404d9267af9ece013a3d7b2154af9c4",
@@ -62,8 +62,8 @@
     "supplier_order_policy": "2182b9c785c4b33543ed7a2770547868c5ec8118e307901fb08fc94eafcfc48c"
   },
   "suite": {
-    "coverage_pct": 76,
-    "tests_passed": 368,
+    "coverage_pct": 79,
+    "tests_passed": 452,
     "tests_skipped": 0
   }
 }

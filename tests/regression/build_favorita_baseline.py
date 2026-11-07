@@ -40,10 +40,15 @@ def main() -> None:
     parser.add_argument("--tests", type=int, required=True, help="testes passando (suíte padrão)")
     parser.add_argument("--skipped", type=int, required=True)
     parser.add_argument("--coverage-pct", type=int, required=True)
+    parser.add_argument(
+        "--allow-dirty",
+        action="store_true",
+        help="aceita árvore suja (código ainda não commitado); grava o hash como '<HEAD>+dirty'",
+    )
     args = parser.parse_args()
 
     dirty = _git("status", "--porcelain", "--", "src", "config")
-    if dirty:
+    if dirty and not args.allow_dirty:
         msg = f"árvore suja, o git_commit_hash não descreveria o código rodado:\n{dirty}"
         raise SystemExit(msg)
 
@@ -72,7 +77,7 @@ def main() -> None:
             "portfolio": manifest["results"]["portfolio"],
         }
     reference = {
-        "git_commit_hash": _git("rev-parse", "HEAD"),
+        "git_commit_hash": _git("rev-parse", "HEAD") + ("+dirty" if dirty else ""),
         "suite": {
             "tests_passed": args.tests,
             "tests_skipped": args.skipped,

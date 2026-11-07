@@ -575,6 +575,7 @@ class QualidadeParams(PilotSection):
     cadastro_minimo_completo: Fraction
     janela_regularidade_dias: PositiveInt
     percentual_dias_com_venda_regular: Fraction
+    janela_devolucao_dias: PositiveInt
 
 
 class AvaliacaoParams(PilotSection):

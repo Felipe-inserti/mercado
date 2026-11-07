@@ -147,6 +147,20 @@ Antes de editar: `grep -rn 'pl.col("date") <' src/` e listar todo ponto encontra
 - Helper puro `moving_average_daily(history, as_of, weeks) -> float` calculado pelo chamador sobre o histórico **já censurado**.
 - Atualizar todos os usos (`grep -rn ErpBaselinePolicy`): `policy/erp_calibration.py`, `experiments/run.py`, `experiments/stale_baseline.py`, `tests/test_erp_baseline.py`.
 
+**Registro da implementação:** `ErpBaselinePolicy(daily_average=..., moving_average_weeks, factor, min_order_units)` — `daily_average: Callable[[date], float]` no construtor (o protocolo `Policy`, o `DecisionContext` e o `engine.py` ficam intactos); sai também o `horizon_days`, que só servia para desfazer a escala do horizonte. Helpers em `policy/erp_baseline.py`: `moving_average_daily(history, as_of, weeks)` e `daily_average_from_history(demand, weeks, censoring_flags)`. Usos atualizados: `erp_calibration.py`, `experiments/run.py` (`_build_policy`), `tests/test_erp_baseline.py`, `tests/test_run.py`. `stale_baseline.py` não constrói a política (passa por `run.py`).
+
+**Mudança do braço 1 e recalibração (registrado em 22/10/2026).** A regressão do Favorita deixou de ser idêntica no braço 1 por causa exclusiva da 24.5; a 24.4 isolada (worktree do commit `d63fbfa`) passou idêntica nos dois braços. Causa: o mu antigo era a mediana do `NaiveForecaster` (média × horizonte + quantil 0,5 dos resíduos) dividida pelo horizonte; o novo é a média móvel pura. Item 1003679, loja 44, decisão de 14/08/2016:
+
+| | antes (mediana do naive) | depois (média móvel pura) |
+|---|---|---|
+| mu (cobertura prevista, unid.) | 10,700 (= média × horizonte − 1,2143 de resíduo) | 10,8214 |
+| alvo | 101,864 | 103,020 |
+| pedido | 21,864 | 23,020 |
+
+A diferença do pedido (1,156) é exatamente a diferença do alvo. Propagou para `order_placed`, `in_transit`, `on_hand`, `sold` e `unmet_demand`.
+
+Com o mu novo, `factor = 0,34` passou a dar nível de serviço 96,47% (antes 95,98%) e `avg_on_hand` 132,32 (antes 129,75). Recalibrado com o mesmo critério da Sprint 7 (menor fator com fill rate ≥ 95%): `factor = 0,32`, fill rate 95,01% (margem de 0,01 p.p. sobre a meta, apertada), `avg_on_hand` 118,08. Referência do Favorita regenerada com `tests/regression/build_favorita_baseline.py --allow-dirty` (flag nova: aceita árvore ainda não commitada e grava `git_commit_hash` como `<HEAD>+dirty`). Braço 2 idêntico ao anterior. Recalibrar sempre que o dado ou a censura mudarem.
+
 **Testes:** pedido não muda quando o forecaster é trocado; pedido bate com cálculo à mão num caso simples; testes antigos de `test_erp_baseline.py` continuam valendo.
 
 **Pronto quando:** braço 1 do Favorita idêntico ao manifesto da 24.0. Se mudar, a diferença é explicada no commit antes de seguir.
@@ -168,7 +182,8 @@ Roda sobre as tabelas canônicas, então não depende do formato do mercado.
   6. item ativo sem fardo ou sem validade; e % do cadastro completo contra `cadastro_minimo_completo`.
 - Verificação sem dado para rodar aparece como **não avaliada**, nunca como zero ocorrências.
 - Exportar xlsx em `results/quality/` com uma aba de resumo legível pela dona (em português, sem nome de coluna técnico) e uma aba por tipo.
-- Se `reporting/auditoria_cadastro.py` (Sprint 22) já existir, reaproveitar o que se sobrepõe.
+- Se `reporting/auditoria_cadastro.py` (Sprint 22) já existir, reaproveitar o que se sobrepõe. **Conferido em 22/10/2026: o arquivo não existe**; nada a reaproveitar.
+- **Registro da implementação:** `build_quality_report(sales, items, *, entries=None, params)` — sem `stock` (nenhuma das seis verificações o usa; Emenda da Sprint 15). A janela da verificação 2 é `mercado_piloto.qualidade.janela_devolucao_dias` (28, arbitrado, novo). A verificação 3 chama `flag_probable_stockout` com "regular" definido por `qualidade.janela_regularidade_dias` e `percentual_dias_com_venda_regular`. O cadastro canônico não tem campo de validade: na verificação 6 só o fardo é avaliado e o resumo diz que a validade não foi avaliada.
 
 **Testes** (`tests/test_quality_report.py`): fixture sintética com exatamente uma ocorrência de cada tipo → relatório acha as seis, nem mais nem menos; fixture limpa → zero; sem `entries` → verificação 5 "não avaliada".
 
@@ -202,6 +217,7 @@ Roda sobre as tabelas canônicas, então não depende do formato do mercado.
 
 - **[OBRIGATÓRIA] `ARM2_CHOSEN_ALPHA` fora da grade de quantis.** `experiments/iso_service.py` define `ARM2_CHOSEN_ALPHA = 0.66`, que não está em `model.quantiles` do `params.yaml` (`[0.5, 0.7, 0.8, 0.85, 0.9, 0.95]`). A decisão por item da lista de compra (`reporting/purchase_list.py::_decide_item`) levanta `ValueError` (alpha fora da grade) com o `params.yaml` atual, então a lista de compra não roda. Não corrigido na Sprint 24, por decisão explícita. Registrado em `tests/test_purchase_list.py` por um teste `xfail(strict=True)`: quando o bug for corrigido o teste passa, o `strict` o derruba, e o `xfail` deve ser removido.
 - Alvo de treino do GBM (braço 3) não é censurado; fora da v1.
+- **[OBRIGATÓRIA] Refazer a comparação de braços e iso-serviço com o baseline recalibrado.** Atualizar os números relativos (capital, nível de serviço, margem) do relatório, do PDF e do documento de negócio antes de mostrar ao investidor.
 
 ---
 

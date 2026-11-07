@@ -40,7 +40,7 @@ import polars as pl
 from motor.experiments.shared import build_simulator_for_pair
 from motor.features.censoring import drop_censored
 from motor.forecast.naive import NaiveForecaster
-from motor.policy.erp_baseline import ErpBaselinePolicy
+from motor.policy.erp_baseline import ErpBaselinePolicy, daily_average_from_history
 from motor.simulator.engine import review_every_n_days
 
 
@@ -155,10 +155,11 @@ def _run_one_combination(
     on_hand_values: list[float] = []
 
     for item in items:
-        horizon_days = item.lead_time_days + item.review_period_days
         forecaster = _PrecomputedForecaster(forecast_cache_by_item[item.item_id])
         policy = ErpBaselinePolicy(
-            horizon_days=horizon_days,
+            daily_average=daily_average_from_history(
+                item.demand, moving_average_weeks, item.censoring_flags
+            ),
             moving_average_weeks=moving_average_weeks,
             factor=factor,
             min_order_units=min_order_units,

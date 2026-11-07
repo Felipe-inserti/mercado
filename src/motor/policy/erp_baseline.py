@@ -4,7 +4,25 @@ mínimo fixo por item (`min_order_units`).
 
 Contrato: `motor.policy.base.Policy`, grão de um par loja-item.
 
-ARTIFÍCIO DELIBERADO -- leia antes de mexer aqui ou em `motor.policy.base`:
+MUDANÇA DA SPRINT 24 (etapa 24.5) -- o artifício abaixo deixou de existir:
+
+A política não lê mais o forecast. Ela recebe `daily_average: Callable[[date],
+float]` no construtor -- a média diária das últimas `moving_average_weeks`
+semanas ANTES de `as_of` -- e a chama com `ctx.as_of`. Quem monta a política
+calcula essa média sobre o histórico já CENSURADO (`moving_average_daily`,
+`daily_average_from_history`), o mesmo que o forecaster do par recebe. Motivos:
+(1) o braço 1 passa a não depender de qual `Forecaster` roda ao lado dele --
+trocar a previsão (naive, estatística, GBM) não muda mais o pedido do ERP, o
+que deixa a comparação do backtest honesta; (2) sai `_median_forecast`, a
+dependência do quantil 0,5 e o `horizon_days` do construtor, que só existiam
+para desfazer a escala do horizonte. O contrato `Policy`, `DecisionContext` e
+`engine.py` seguem intactos. EFEITO NUMÉRICO: a mediana do `NaiveForecaster` era
+`media x horizonte` MAIS o quantil 0,5 dos resíduos (não exatamente zero), então
+o pedido do braço 1 pode diferir levemente do de antes da Sprint 24; a
+regressão do Favorita mede essa diferença.
+
+ARTIFÍCIO DELIBERADO (Sprint 7, HISTÓRICO -- mantido pelo raciocínio, não mais
+em vigor) -- leia antes de mexer aqui ou em `motor.policy.base`:
 
 `DecisionContext.forecast` só carrega a demanda ACUMULADA no horizonte de
 risco (lead_time + review_period) -- é o contrato de `motor.forecast.base.Forecaster`,
@@ -41,9 +59,50 @@ de propósito (ver comentário lá).
 
 from __future__ import annotations
 
+from collections.abc import Callable
+from datetime import date, timedelta
+from statistics import mean
+
 import polars as pl
 
+from motor.features.censoring import drop_censored
 from motor.policy.base import DecisionContext
+
+_DAYS_PER_WEEK = 7
+
+
+def moving_average_daily(history: pl.DataFrame, as_of: date, weeks: int) -> float:
+    """Média diária de `units_sold` nos dias de `[as_of - 7*weeks, as_of)`
+    presentes em `history` (colunas `date`, `units_sold`).
+
+    Pura. Dia sem linha é excluído da média, não tratado como zero (dado
+    ausente não é dado zero, CLAUDE.md, seção 8) -- mesma regra do
+    `NaiveForecaster`. Sem nenhum dia na janela: 0.0, comportamento definido.
+    O chamador passa o histórico JÁ censurado; linhas com `date >= as_of` são
+    ignoradas por construção (a janela é aberta em `as_of`).
+    """
+    if weeks <= 0:
+        msg = f"weeks deve ser positivo, recebeu {weeks}"
+        raise ValueError(msg)
+    window_start = as_of - timedelta(days=weeks * _DAYS_PER_WEEK)
+    window = history.filter((pl.col("date") >= window_start) & (pl.col("date") < as_of))
+    values: list[float] = window["units_sold"].to_list()
+    return mean(values) if values else 0.0
+
+
+def daily_average_from_history(
+    demand: pl.DataFrame, weeks: int, censoring_flags: pl.DataFrame | None = None
+) -> Callable[[date], float]:
+    """Monta o `daily_average` de `ErpBaselinePolicy` para UM par loja-item.
+
+    `demand`: colunas `date`, `units_sold`. Os dias marcados em
+    `censoring_flags` (formato de `flags_for_item`) saem UMA vez, aqui; a flag
+    de um dia só depende do passado dele, então remover todos de uma vez não
+    vaza futuro. A função devolvida só enxerga `date < as_of` (corte dentro de
+    `moving_average_daily`), o mesmo recorte que o simulador entrega ao forecaster.
+    """
+    history = drop_censored(demand, censoring_flags) if censoring_flags is not None else demand
+    return lambda as_of: moving_average_daily(history, as_of, weeks)
 
 
 class ErpBaselinePolicy:
@@ -52,14 +111,11 @@ class ErpBaselinePolicy:
     def __init__(
         self,
         *,
-        horizon_days: int,
+        daily_average: Callable[[date], float],
         moving_average_weeks: int,
         factor: float,
         min_order_units: float,
     ) -> None:
-        if horizon_days <= 0:
-            msg = f"horizon_days deve ser positivo, recebeu {horizon_days}"
-            raise ValueError(msg)
         if moving_average_weeks <= 0:
             msg = f"moving_average_weeks deve ser positivo, recebeu {moving_average_weeks}"
             raise ValueError(msg)
@@ -69,20 +125,21 @@ class ErpBaselinePolicy:
         if min_order_units < 0:
             msg = f"min_order_units não pode ser negativo, recebeu {min_order_units}"
             raise ValueError(msg)
-        self._horizon_days = horizon_days
-        self._moving_average_days = moving_average_weeks * 7
+        self._daily_average = daily_average
+        self._moving_average_days = moving_average_weeks * _DAYS_PER_WEEK
         self._factor = factor
         self._min_order_units = min_order_units
 
     def order(self, ctx: DecisionContext) -> float:
         """`target = mu_daily x moving_average_days x factor`; pedido = `target -
         posição`, com piso em `min_order_units` quando o pedido bruto é positivo.
+        `mu_daily = daily_average(ctx.as_of)`; `ctx.forecast` não é lido.
 
         Pedido bruto <= 0 nunca vira `min_order_units`: o piso é uma
         quantidade mínima de pedido quando HÁ pedido, não um gatilho pra
         pedir sem necessidade.
         """
-        mu_daily = self._median_forecast(ctx) / self._horizon_days
+        mu_daily = self._daily_average(ctx.as_of)
         target = mu_daily * self._moving_average_days * self._factor
         position = ctx.on_hand + ctx.in_transit
         order_raw = target - position
@@ -90,14 +147,3 @@ class ErpBaselinePolicy:
         if order_raw <= 0:
             return 0.0
         return max(order_raw, self._min_order_units)
-
-    def _median_forecast(self, ctx: DecisionContext) -> float:
-        mediana = ctx.forecast.filter(pl.col("quantile") == 0.5)
-        if mediana.height != 1:
-            msg = (
-                "ErpBaselinePolicy exige exatamente uma linha com quantile==0.5 em "
-                f"ctx.forecast (o ponto central de NaiveForecaster está sempre lá); "
-                f"encontrado {mediana.height} linha(s)"
-            )
-            raise ValueError(msg)
-        return float(mediana["value"][0])

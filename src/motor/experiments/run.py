@@ -65,7 +65,7 @@ from motor.metrics.financial import (
 )
 from motor.policy.base import Policy
 from motor.policy.basestock import BasestockPolicy
-from motor.policy.erp_baseline import ErpBaselinePolicy
+from motor.policy.erp_baseline import ErpBaselinePolicy, daily_average_from_history
 from motor.selection import SubsetSelectionResult, select_subset
 
 _REPO_ROOT: Final = Path(__file__).resolve().parents[3]
@@ -180,14 +180,26 @@ def _build_forecaster(name: str, params: Params) -> Forecaster:
     raise ValueError(msg)
 
 
-def _build_policy(name: str, params: Params, *, horizon_days: int, alpha: float) -> Policy:
+def _build_policy(
+    name: str,
+    params: Params,
+    *,
+    horizon_days: int,
+    alpha: float,
+    demand: pl.DataFrame,
+    censoring_flags: pl.DataFrame | None = None,
+) -> Policy:
     """`alpha` só é usado pelo braço `basestock` -- `erp_baseline` não deriva
     nada de quantil (ver docstring de `ErpBaselinePolicy`). Aceito
     incondicionalmente, em vez de opcional, para que `run_arm` não precise
-    saber qual política vai consumir o valor antes de montá-la."""
+    saber qual política vai consumir o valor antes de montá-la. `demand` e
+    `censoring_flags` (Sprint 24, 24.5) só alimentam a média diária do
+    `erp_baseline`, calculada sobre o histórico censurado."""
     if name == "erp_baseline":
         return ErpBaselinePolicy(
-            horizon_days=horizon_days,
+            daily_average=daily_average_from_history(
+                demand, params.forecast_naive.moving_average_weeks, censoring_flags
+            ),
             moving_average_weeks=params.forecast_naive.moving_average_weeks,
             factor=params.erp_baseline.factor,
             min_order_units=params.erp_baseline.min_order_units,
@@ -479,11 +491,18 @@ def run_arm(
             )
         else:
             forecaster = _build_forecaster(arm.forecaster, params)
+        item_censoring_flags = (
+            flags_for_item(censoring_flags, subset.store_id, item_id)
+            if censoring_flags is not None
+            else None
+        )
         policy = _build_policy(
             arm.policy,
             params,
             horizon_days=horizon_days,
             alpha=params.economics.default_alpha,
+            demand=demand,
+            censoring_flags=item_censoring_flags,
         )
 
         simulator = build_simulator_for_pair(
@@ -495,11 +514,7 @@ def run_arm(
             start=params.simulation.start_date,
             warmup_days=params.simulation.warmup_days,
             quantiles=params.model.quantiles,
-            censoring_flags=(
-                flags_for_item(censoring_flags, subset.store_id, item_id)
-                if censoring_flags is not None
-                else None
-            ),
+            censoring_flags=item_censoring_flags,
         )
         events = simulator.run(params.simulation.start_date, params.simulation.end_date)
         event_frames.append(

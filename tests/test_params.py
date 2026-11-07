@@ -74,6 +74,7 @@ def test_mercado_piloto_carrega_todas_as_chaves() -> None:
     assert mp.qualidade.cadastro_minimo_completo == 0.90
     assert mp.qualidade.janela_regularidade_dias == 28
     assert mp.qualidade.percentual_dias_com_venda_regular == 0.80
+    assert mp.qualidade.janela_devolucao_dias == 28
     assert mp.avaliacao.quantis_cobertura == [0.8, 0.9, 0.95]
 
 

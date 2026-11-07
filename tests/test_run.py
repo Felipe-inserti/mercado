@@ -39,6 +39,7 @@ from motor.experiments.run import (
 from motor.experiments.sensitivity import build_cell_params
 from motor.forecast.statistical import StatisticalForecaster
 from motor.policy.basestock import BasestockPolicy
+from motor.policy.erp_baseline import ErpBaselinePolicy
 from motor.selection import SubsetSelectionResult
 from motor.simulator.engine import review_every_n_days
 
@@ -369,18 +370,45 @@ def test_build_forecaster_statistical_devolve_statistical_forecaster() -> None:
     assert isinstance(forecaster, StatisticalForecaster)
 
 
+_EMPTY_DEMAND = pl.DataFrame(
+    schema={"date": pl.Date, "units_sold": pl.Float64},
+)
+
+
 def test_build_policy_basestock_devolve_basestock_policy() -> None:
     params = _tiny_params()
     policy = _build_policy(
-        "basestock", params, horizon_days=5, alpha=params.economics.default_alpha
+        "basestock",
+        params,
+        horizon_days=5,
+        alpha=params.economics.default_alpha,
+        demand=_EMPTY_DEMAND,
     )
     assert isinstance(policy, BasestockPolicy)
+
+
+def test_build_policy_erp_baseline_devolve_erp_baseline_policy() -> None:
+    params = _tiny_params()
+    policy = _build_policy(
+        "erp_baseline",
+        params,
+        horizon_days=5,
+        alpha=params.economics.default_alpha,
+        demand=_EMPTY_DEMAND,
+    )
+    assert isinstance(policy, ErpBaselinePolicy)
 
 
 def test_build_policy_desconhecida_levanta_value_error() -> None:
     params = _tiny_params()
     with pytest.raises(ValueError, match="policy desconhecida"):
-        _build_policy("nao_existe", params, horizon_days=5, alpha=params.economics.default_alpha)
+        _build_policy(
+            "nao_existe",
+            params,
+            horizon_days=5,
+            alpha=params.economics.default_alpha,
+            demand=_EMPTY_DEMAND,
+        )
 
 
 def test_find_arm_desconhecido_levanta_value_error() -> None:
