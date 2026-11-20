@@ -1,0 +1,900 @@
+{
+  "as_of": "2016-11-28",
+  "scenarios": {
+    "cash_below_floors": {
+      "report": {
+        "category_floor_alert": {
+          "budget_rs": 4000.0,
+          "shortfall_rs": 1313.6,
+          "total_floor_rs": 5313.6
+        },
+        "counts": {
+          "item_novo": 2,
+          "limite_de_variacao": 1,
+          "restricao_de_caixa": 6,
+          "teto_de_cobertura": 4
+        },
+        "not_implemented": [
+          "promocao_prevista -- exige calendário promocional (Item.on_promo futuro/planejado); o canônico Favorita só carrega on_promo HISTÓRICO em sales.parquet (o que já aconteceu), nunca o que está planejado -- não dá pra reagir a uma promoção que o dado não anuncia com antecedência. Não implementada.",
+          "item_ancora -- exige análise de cesta (quais itens saem juntos, para proteger presença de item de entrada mesmo com margem comprimida) -- fora de escopo da v1 (Item.is_anchor é 100% nulo no canônico, Sprint 3 D7). Não implementada."
+        ]
+      },
+      "suppliers": [
+        {
+          "category": "EGGS",
+          "exceptions": [
+            {
+              "adjustments": [
+                "arredondado para cima (fardo)",
+                "aumentado para bater pedido mínimo do fornecedor",
+                "aumentado para bater pedido mínimo do fornecedor",
+                "aumentado para bater pedido mínimo do fornecedor",
+                "pedido adiado -- mínimo do fornecedor inatingível hoje",
+                "teto de validade (14d) menor que a janela de risco (21d); ciclo de compra incompatível com a família -- piso de 21d aplicado no lugar da validade"
+              ],
+              "category": "EGGS",
+              "coverage_days_after_order": 14.0,
+              "in_transit": 0.0,
+              "is_exception": true,
+              "item_id": "E-ONE",
+              "margin_pct": 0.17,
+              "on_hand": 14.0,
+              "quantity_packs": 0.0,
+              "quantity_units": 0.0,
+              "unit_of_sale": "unidade",
+              "value_rs": 0.0
+            },
+            {
+              "adjustments": [
+                "arredondado para cima (fardo)",
+                "aumentado para bater pedido mínimo do fornecedor",
+                "aumentado para bater pedido mínimo do fornecedor",
+                "aumentado para bater pedido mínimo do fornecedor",
+                "aumentado para bater pedido mínimo do fornecedor",
+                "aumentado para bater pedido mínimo do fornecedor",
+                "aumentado para bater pedido mínimo do fornecedor",
+                "aumentado para bater pedido mínimo do fornecedor",
+                "pedido adiado -- mínimo do fornecedor inatingível hoje",
+                "teto de validade (14d) menor que a janela de risco (21d); ciclo de compra incompatível com a família -- piso de 21d aplicado no lugar da validade"
+              ],
+              "category": "EGGS",
+              "coverage_days_after_order": 14.0,
+              "in_transit": 0.0,
+              "is_exception": true,
+              "item_id": "E-TWO",
+              "margin_pct": 0.17,
+              "on_hand": 28.0,
+              "quantity_packs": 0.0,
+              "quantity_units": 0.0,
+              "unit_of_sale": "unidade",
+              "value_rs": 0.0
+            }
+          ],
+          "main": [],
+          "min_order_value": 2000.0,
+          "outcome": "minimo_inatingivel",
+          "supplier_id": "SUP-EGGS"
+        },
+        {
+          "category": "GROCERY I",
+          "exceptions": [
+            {
+              "adjustments": [
+                "arredondado para cima (fardo)",
+                "item novo -- quantidade fixa pela mediana da categoria (52.50 unidades), não pelo modelo (que sugeriria 22.93 unidades sobre histórico curto demais para confiar)",
+                "reduzido por restrição de caixa -- fora do orçamento do ciclo (R$ 4,000.00), valor original R$ 492.00, margem 18.0%; cortado por ordem de margem gerada por real investido, não proporcionalmente (orçamento não cobre nem o piso desta categoria)"
+              ],
+              "category": "GROCERY I",
+              "coverage_days_after_order": 45.714286,
+              "in_transit": 0.0,
+              "is_exception": true,
+              "item_id": "G-NEW",
+              "margin_pct": 0.18,
+              "on_hand": 8.571429,
+              "quantity_packs": 0.0,
+              "quantity_units": 0.0,
+              "unit_of_sale": "unidade",
+              "value_rs": 0.0
+            },
+            {
+              "adjustments": [
+                "arredondado para cima (fardo)",
+                "reduzido por restrição de caixa -- fora do orçamento do ciclo (R$ 4,000.00), valor original R$ 590.40, margem 18.0%; cortado por ordem de margem gerada por real investido, não proporcionalmente (orçamento não cobre nem o piso desta categoria)"
+              ],
+              "category": "GROCERY I",
+              "coverage_days_after_order": 21.2,
+              "in_transit": 0.0,
+              "is_exception": true,
+              "item_id": "G-REGULAR",
+              "margin_pct": 0.18,
+              "on_hand": 140.0,
+              "quantity_packs": 0.0,
+              "quantity_units": 0.0,
+              "unit_of_sale": "unidade",
+              "value_rs": 0.0
+            },
+            {
+              "adjustments": [
+                "arredondado para cima (fardo)",
+                "reduzido por restrição de caixa -- fora do orçamento do ciclo (R$ 4,000.00), valor original R$ 295.20, margem 18.0%; cortado por ordem de margem gerada por real investido, não proporcionalmente (orçamento não cobre nem o piso desta categoria)"
+              ],
+              "category": "GROCERY I",
+              "coverage_days_after_order": 21.2,
+              "in_transit": 0.0,
+              "is_exception": true,
+              "item_id": "G-SMALL",
+              "margin_pct": 0.18,
+              "on_hand": 70.0,
+              "quantity_packs": 0.0,
+              "quantity_units": 0.0,
+              "unit_of_sale": "unidade",
+              "value_rs": 0.0
+            },
+            {
+              "adjustments": [
+                "arredondado para cima (fardo)",
+                "sugestão de 286.78 unidades é 6.8x a média das compras dos últimos dias (42.29) -- acima do limite de 2x, sinalizado para revisão humana (quantidade NÃO alterada)",
+                "reduzido por restrição de caixa -- fora do orçamento do ciclo (R$ 4,000.00), valor original R$ 2,361.60, margem 18.0%; cortado por ordem de margem gerada por real investido, não proporcionalmente (orçamento não cobre nem o piso desta categoria)"
+              ],
+              "category": "GROCERY I",
+              "coverage_days_after_order": 21.059438,
+              "in_transit": 0.0,
+              "is_exception": true,
+              "item_id": "G-SURGE",
+              "margin_pct": 0.18,
+              "on_hand": 143.718487,
+              "quantity_packs": 0.0,
+              "quantity_units": 0.0,
+              "unit_of_sale": "unidade",
+              "value_rs": 0.0
+            }
+          ],
+          "main": [
+            {
+              "adjustments": [],
+              "category": "GROCERY I",
+              "coverage_days_after_order": null,
+              "in_transit": 0.0,
+              "is_exception": false,
+              "item_id": "G-DORMANT",
+              "margin_pct": 0.18,
+              "on_hand": 16.461039,
+              "quantity_packs": 0.0,
+              "quantity_units": 0.0,
+              "unit_of_sale": "unidade",
+              "value_rs": 0.0
+            }
+          ],
+          "min_order_value": 0.0,
+          "outcome": "pedido_emitido",
+          "supplier_id": "SUP-GROCERY"
+        },
+        {
+          "category": "PRODUCE",
+          "exceptions": [
+            {
+              "adjustments": [
+                "arredondado para cima (fardo)",
+                "item novo -- quantidade fixa pela mediana da categoria (184.28 unidades), não pelo modelo (que sugeriria 0.00 unidades sobre histórico curto demais para confiar)",
+                "reduzido por restrição de caixa -- fora do orçamento do ciclo (R$ 4,000.00), valor original R$ 1,480.00, margem 20.0%; cortado por ordem de margem gerada por real investido, não proporcionalmente (fora do piso -- só o piso desta categoria foi concedido)"
+              ],
+              "category": "PRODUCE",
+              "coverage_days_after_order": null,
+              "in_transit": 0.0,
+              "is_exception": true,
+              "item_id": "P-NEVER",
+              "margin_pct": 0.2,
+              "on_hand": 0.0,
+              "quantity_packs": 0.0,
+              "quantity_units": 0.0,
+              "unit_of_sale": "unidade",
+              "value_rs": 0.0
+            },
+            {
+              "adjustments": [
+                "teto de validade (7d) menor que a janela de risco (21d); ciclo de compra incompatível com a família -- piso de 21d aplicado no lugar da validade"
+              ],
+              "category": "PRODUCE",
+              "coverage_days_after_order": 21.0,
+              "in_transit": 0.0,
+              "is_exception": true,
+              "item_id": "P-REGULAR",
+              "margin_pct": 0.2,
+              "on_hand": 140.0,
+              "quantity_packs": 70.0,
+              "quantity_units": 70.0,
+              "unit_of_sale": "unidade",
+              "value_rs": 560.0
+            },
+            {
+              "adjustments": [
+                "arredondado para cima (fardo)",
+                "teto de validade (7d) menor que a janela de risco (21d); ciclo de compra incompatível com a família -- piso de 21d aplicado no lugar da validade; cortado de 350.00 para 298.55 unidades -- teto efetivo de 21 dias de cobertura (posição atual 679.00 unidades, demanda esperada 46.55 unidades/dia)",
+                "protegido pelo piso de categoria -- 'PRODUCE' nunca cai abaixo de R$ 2,952.00 (67% do valor originalmente sugerido para a categoria), mesmo com margem 20.0% que seria cortada pela ordem de margem sozinha"
+              ],
+              "category": "PRODUCE",
+              "coverage_days_after_order": 21.009621,
+              "in_transit": 0.0,
+              "is_exception": true,
+              "item_id": "P-TREND",
+              "margin_pct": 0.2,
+              "on_hand": 678.997863,
+              "quantity_packs": 299.0,
+              "quantity_units": 299.0,
+              "unit_of_sale": "unidade",
+              "value_rs": 2392.0
+            }
+          ],
+          "main": [],
+          "min_order_value": 0.0,
+          "outcome": "pedido_emitido",
+          "supplier_id": "SUP-PRODUCE"
+        }
+      ]
+    },
+    "cash_limited": {
+      "report": {
+        "category_floor_alert": null,
+        "counts": {
+          "item_novo": 2,
+          "limite_de_variacao": 1,
+          "restricao_de_caixa": 4,
+          "teto_de_cobertura": 4
+        },
+        "not_implemented": [
+          "promocao_prevista -- exige calendário promocional (Item.on_promo futuro/planejado); o canônico Favorita só carrega on_promo HISTÓRICO em sales.parquet (o que já aconteceu), nunca o que está planejado -- não dá pra reagir a uma promoção que o dado não anuncia com antecedência. Não implementada.",
+          "item_ancora -- exige análise de cesta (quais itens saem juntos, para proteger presença de item de entrada mesmo com margem comprimida) -- fora de escopo da v1 (Item.is_anchor é 100% nulo no canônico, Sprint 3 D7). Não implementada."
+        ]
+      },
+      "suppliers": [
+        {
+          "category": "EGGS",
+          "exceptions": [
+            {
+              "adjustments": [
+                "arredondado para cima (fardo)",
+                "aumentado para bater pedido mínimo do fornecedor",
+                "aumentado para bater pedido mínimo do fornecedor",
+                "aumentado para bater pedido mínimo do fornecedor",
+                "pedido adiado -- mínimo do fornecedor inatingível hoje",
+                "teto de validade (14d) menor que a janela de risco (21d); ciclo de compra incompatível com a família -- piso de 21d aplicado no lugar da validade"
+              ],
+              "category": "EGGS",
+              "coverage_days_after_order": 14.0,
+              "in_transit": 0.0,
+              "is_exception": true,
+              "item_id": "E-ONE",
+              "margin_pct": 0.17,
+              "on_hand": 14.0,
+              "quantity_packs": 0.0,
+              "quantity_units": 0.0,
+              "unit_of_sale": "unidade",
+              "value_rs": 0.0
+            },
+            {
+              "adjustments": [
+                "arredondado para cima (fardo)",
+                "aumentado para bater pedido mínimo do fornecedor",
+                "aumentado para bater pedido mínimo do fornecedor",
+                "aumentado para bater pedido mínimo do fornecedor",
+                "aumentado para bater pedido mínimo do fornecedor",
+                "aumentado para bater pedido mínimo do fornecedor",
+                "aumentado para bater pedido mínimo do fornecedor",
+                "aumentado para bater pedido mínimo do fornecedor",
+                "pedido adiado -- mínimo do fornecedor inatingível hoje",
+                "teto de validade (14d) menor que a janela de risco (21d); ciclo de compra incompatível com a família -- piso de 21d aplicado no lugar da validade"
+              ],
+              "category": "EGGS",
+              "coverage_days_after_order": 14.0,
+              "in_transit": 0.0,
+              "is_exception": true,
+              "item_id": "E-TWO",
+              "margin_pct": 0.17,
+              "on_hand": 28.0,
+              "quantity_packs": 0.0,
+              "quantity_units": 0.0,
+              "unit_of_sale": "unidade",
+              "value_rs": 0.0
+            }
+          ],
+          "main": [],
+          "min_order_value": 2000.0,
+          "outcome": "minimo_inatingivel",
+          "supplier_id": "SUP-EGGS"
+        },
+        {
+          "category": "GROCERY I",
+          "exceptions": [
+            {
+              "adjustments": [
+                "arredondado para cima (fardo)",
+                "item novo -- quantidade fixa pela mediana da categoria (52.50 unidades), não pelo modelo (que sugeriria 22.93 unidades sobre histórico curto demais para confiar)",
+                "reduzido por restrição de caixa -- fora do orçamento do ciclo (R$ 7,000.00), valor original R$ 492.00, margem 18.0%; cortado por ordem de margem gerada por real investido, não proporcionalmente"
+              ],
+              "category": "GROCERY I",
+              "coverage_days_after_order": 45.714286,
+              "in_transit": 0.0,
+              "is_exception": true,
+              "item_id": "G-NEW",
+              "margin_pct": 0.18,
+              "on_hand": 8.571429,
+              "quantity_packs": 0.0,
+              "quantity_units": 0.0,
+              "unit_of_sale": "unidade",
+              "value_rs": 0.0
+            },
+            {
+              "adjustments": [
+                "arredondado para cima (fardo)",
+                "reduzido por restrição de caixa -- fora do orçamento do ciclo (R$ 7,000.00), valor original R$ 590.40, margem 18.0%; cortado por ordem de margem gerada por real investido, não proporcionalmente"
+              ],
+              "category": "GROCERY I",
+              "coverage_days_after_order": 21.2,
+              "in_transit": 0.0,
+              "is_exception": true,
+              "item_id": "G-REGULAR",
+              "margin_pct": 0.18,
+              "on_hand": 140.0,
+              "quantity_packs": 0.0,
+              "quantity_units": 0.0,
+              "unit_of_sale": "unidade",
+              "value_rs": 0.0
+            },
+            {
+              "adjustments": [
+                "arredondado para cima (fardo)",
+                "reduzido por restrição de caixa -- fora do orçamento do ciclo (R$ 7,000.00), valor original R$ 295.20, margem 18.0%; cortado por ordem de margem gerada por real investido, não proporcionalmente"
+              ],
+              "category": "GROCERY I",
+              "coverage_days_after_order": 21.2,
+              "in_transit": 0.0,
+              "is_exception": true,
+              "item_id": "G-SMALL",
+              "margin_pct": 0.18,
+              "on_hand": 70.0,
+              "quantity_packs": 0.0,
+              "quantity_units": 0.0,
+              "unit_of_sale": "unidade",
+              "value_rs": 0.0
+            },
+            {
+              "adjustments": [
+                "arredondado para cima (fardo)",
+                "sugestão de 286.78 unidades é 6.8x a média das compras dos últimos dias (42.29) -- acima do limite de 2x, sinalizado para revisão humana (quantidade NÃO alterada)",
+                "protegido pelo piso de categoria -- 'GROCERY I' nunca cai abaixo de R$ 2,243.52 (60% do valor originalmente sugerido para a categoria), mesmo com margem 18.0% que seria cortada pela ordem de margem sozinha"
+              ],
+              "category": "GROCERY I",
+              "coverage_days_after_order": 21.059438,
+              "in_transit": 0.0,
+              "is_exception": true,
+              "item_id": "G-SURGE",
+              "margin_pct": 0.18,
+              "on_hand": 143.718487,
+              "quantity_packs": 24.0,
+              "quantity_units": 288.0,
+              "unit_of_sale": "unidade",
+              "value_rs": 2361.6
+            }
+          ],
+          "main": [
+            {
+              "adjustments": [],
+              "category": "GROCERY I",
+              "coverage_days_after_order": null,
+              "in_transit": 0.0,
+              "is_exception": false,
+              "item_id": "G-DORMANT",
+              "margin_pct": 0.18,
+              "on_hand": 16.461039,
+              "quantity_packs": 0.0,
+              "quantity_units": 0.0,
+              "unit_of_sale": "unidade",
+              "value_rs": 0.0
+            }
+          ],
+          "min_order_value": 0.0,
+          "outcome": "pedido_emitido",
+          "supplier_id": "SUP-GROCERY"
+        },
+        {
+          "category": "PRODUCE",
+          "exceptions": [
+            {
+              "adjustments": [
+                "arredondado para cima (fardo)",
+                "item novo -- quantidade fixa pela mediana da categoria (184.28 unidades), não pelo modelo (que sugeriria 0.00 unidades sobre histórico curto demais para confiar)"
+              ],
+              "category": "PRODUCE",
+              "coverage_days_after_order": null,
+              "in_transit": 0.0,
+              "is_exception": true,
+              "item_id": "P-NEVER",
+              "margin_pct": 0.2,
+              "on_hand": 0.0,
+              "quantity_packs": 185.0,
+              "quantity_units": 185.0,
+              "unit_of_sale": "unidade",
+              "value_rs": 1480.0
+            },
+            {
+              "adjustments": [
+                "teto de validade (7d) menor que a janela de risco (21d); ciclo de compra incompatível com a família -- piso de 21d aplicado no lugar da validade"
+              ],
+              "category": "PRODUCE",
+              "coverage_days_after_order": 21.0,
+              "in_transit": 0.0,
+              "is_exception": true,
+              "item_id": "P-REGULAR",
+              "margin_pct": 0.2,
+              "on_hand": 140.0,
+              "quantity_packs": 70.0,
+              "quantity_units": 70.0,
+              "unit_of_sale": "unidade",
+              "value_rs": 560.0
+            },
+            {
+              "adjustments": [
+                "arredondado para cima (fardo)",
+                "teto de validade (7d) menor que a janela de risco (21d); ciclo de compra incompatível com a família -- piso de 21d aplicado no lugar da validade; cortado de 350.00 para 298.55 unidades -- teto efetivo de 21 dias de cobertura (posição atual 679.00 unidades, demanda esperada 46.55 unidades/dia)"
+              ],
+              "category": "PRODUCE",
+              "coverage_days_after_order": 21.009621,
+              "in_transit": 0.0,
+              "is_exception": true,
+              "item_id": "P-TREND",
+              "margin_pct": 0.2,
+              "on_hand": 678.997863,
+              "quantity_packs": 299.0,
+              "quantity_units": 299.0,
+              "unit_of_sale": "unidade",
+              "value_rs": 2392.0
+            }
+          ],
+          "main": [],
+          "min_order_value": 0.0,
+          "outcome": "pedido_emitido",
+          "supplier_id": "SUP-PRODUCE"
+        }
+      ]
+    },
+    "default": {
+      "report": {
+        "category_floor_alert": null,
+        "counts": {
+          "item_novo": 2,
+          "limite_de_variacao": 1,
+          "restricao_de_caixa": 0,
+          "teto_de_cobertura": 4
+        },
+        "not_implemented": [
+          "promocao_prevista -- exige calendário promocional (Item.on_promo futuro/planejado); o canônico Favorita só carrega on_promo HISTÓRICO em sales.parquet (o que já aconteceu), nunca o que está planejado -- não dá pra reagir a uma promoção que o dado não anuncia com antecedência. Não implementada.",
+          "item_ancora -- exige análise de cesta (quais itens saem juntos, para proteger presença de item de entrada mesmo com margem comprimida) -- fora de escopo da v1 (Item.is_anchor é 100% nulo no canônico, Sprint 3 D7). Não implementada."
+        ]
+      },
+      "suppliers": [
+        {
+          "category": "EGGS",
+          "exceptions": [
+            {
+              "adjustments": [
+                "arredondado para cima (fardo)",
+                "aumentado para bater pedido mínimo do fornecedor",
+                "aumentado para bater pedido mínimo do fornecedor",
+                "aumentado para bater pedido mínimo do fornecedor",
+                "pedido adiado -- mínimo do fornecedor inatingível hoje",
+                "teto de validade (14d) menor que a janela de risco (21d); ciclo de compra incompatível com a família -- piso de 21d aplicado no lugar da validade"
+              ],
+              "category": "EGGS",
+              "coverage_days_after_order": 14.0,
+              "in_transit": 0.0,
+              "is_exception": true,
+              "item_id": "E-ONE",
+              "margin_pct": 0.17,
+              "on_hand": 14.0,
+              "quantity_packs": 0.0,
+              "quantity_units": 0.0,
+              "unit_of_sale": "unidade",
+              "value_rs": 0.0
+            },
+            {
+              "adjustments": [
+                "arredondado para cima (fardo)",
+                "aumentado para bater pedido mínimo do fornecedor",
+                "aumentado para bater pedido mínimo do fornecedor",
+                "aumentado para bater pedido mínimo do fornecedor",
+                "aumentado para bater pedido mínimo do fornecedor",
+                "aumentado para bater pedido mínimo do fornecedor",
+                "aumentado para bater pedido mínimo do fornecedor",
+                "aumentado para bater pedido mínimo do fornecedor",
+                "pedido adiado -- mínimo do fornecedor inatingível hoje",
+                "teto de validade (14d) menor que a janela de risco (21d); ciclo de compra incompatível com a família -- piso de 21d aplicado no lugar da validade"
+              ],
+              "category": "EGGS",
+              "coverage_days_after_order": 14.0,
+              "in_transit": 0.0,
+              "is_exception": true,
+              "item_id": "E-TWO",
+              "margin_pct": 0.17,
+              "on_hand": 28.0,
+              "quantity_packs": 0.0,
+              "quantity_units": 0.0,
+              "unit_of_sale": "unidade",
+              "value_rs": 0.0
+            }
+          ],
+          "main": [],
+          "min_order_value": 2000.0,
+          "outcome": "minimo_inatingivel",
+          "supplier_id": "SUP-EGGS"
+        },
+        {
+          "category": "GROCERY I",
+          "exceptions": [
+            {
+              "adjustments": [
+                "arredondado para cima (fardo)",
+                "item novo -- quantidade fixa pela mediana da categoria (52.50 unidades), não pelo modelo (que sugeriria 22.93 unidades sobre histórico curto demais para confiar)"
+              ],
+              "category": "GROCERY I",
+              "coverage_days_after_order": 45.714286,
+              "in_transit": 0.0,
+              "is_exception": true,
+              "item_id": "G-NEW",
+              "margin_pct": 0.18,
+              "on_hand": 8.571429,
+              "quantity_packs": 5.0,
+              "quantity_units": 60.0,
+              "unit_of_sale": "unidade",
+              "value_rs": 492.0
+            },
+            {
+              "adjustments": [
+                "arredondado para cima (fardo)",
+                "sugestão de 286.78 unidades é 6.8x a média das compras dos últimos dias (42.29) -- acima do limite de 2x, sinalizado para revisão humana (quantidade NÃO alterada)"
+              ],
+              "category": "GROCERY I",
+              "coverage_days_after_order": 21.059438,
+              "in_transit": 0.0,
+              "is_exception": true,
+              "item_id": "G-SURGE",
+              "margin_pct": 0.18,
+              "on_hand": 143.718487,
+              "quantity_packs": 24.0,
+              "quantity_units": 288.0,
+              "unit_of_sale": "unidade",
+              "value_rs": 2361.6
+            }
+          ],
+          "main": [
+            {
+              "adjustments": [],
+              "category": "GROCERY I",
+              "coverage_days_after_order": null,
+              "in_transit": 0.0,
+              "is_exception": false,
+              "item_id": "G-DORMANT",
+              "margin_pct": 0.18,
+              "on_hand": 16.461039,
+              "quantity_packs": 0.0,
+              "quantity_units": 0.0,
+              "unit_of_sale": "unidade",
+              "value_rs": 0.0
+            },
+            {
+              "adjustments": [
+                "arredondado para cima (fardo)"
+              ],
+              "category": "GROCERY I",
+              "coverage_days_after_order": 21.2,
+              "in_transit": 0.0,
+              "is_exception": false,
+              "item_id": "G-REGULAR",
+              "margin_pct": 0.18,
+              "on_hand": 140.0,
+              "quantity_packs": 6.0,
+              "quantity_units": 72.0,
+              "unit_of_sale": "unidade",
+              "value_rs": 590.4
+            },
+            {
+              "adjustments": [
+                "arredondado para cima (fardo)"
+              ],
+              "category": "GROCERY I",
+              "coverage_days_after_order": 21.2,
+              "in_transit": 0.0,
+              "is_exception": false,
+              "item_id": "G-SMALL",
+              "margin_pct": 0.18,
+              "on_hand": 70.0,
+              "quantity_packs": 3.0,
+              "quantity_units": 36.0,
+              "unit_of_sale": "unidade",
+              "value_rs": 295.2
+            }
+          ],
+          "min_order_value": 0.0,
+          "outcome": "pedido_emitido",
+          "supplier_id": "SUP-GROCERY"
+        },
+        {
+          "category": "PRODUCE",
+          "exceptions": [
+            {
+              "adjustments": [
+                "arredondado para cima (fardo)",
+                "item novo -- quantidade fixa pela mediana da categoria (184.28 unidades), não pelo modelo (que sugeriria 0.00 unidades sobre histórico curto demais para confiar)"
+              ],
+              "category": "PRODUCE",
+              "coverage_days_after_order": null,
+              "in_transit": 0.0,
+              "is_exception": true,
+              "item_id": "P-NEVER",
+              "margin_pct": 0.2,
+              "on_hand": 0.0,
+              "quantity_packs": 185.0,
+              "quantity_units": 185.0,
+              "unit_of_sale": "unidade",
+              "value_rs": 1480.0
+            },
+            {
+              "adjustments": [
+                "teto de validade (7d) menor que a janela de risco (21d); ciclo de compra incompatível com a família -- piso de 21d aplicado no lugar da validade"
+              ],
+              "category": "PRODUCE",
+              "coverage_days_after_order": 21.0,
+              "in_transit": 0.0,
+              "is_exception": true,
+              "item_id": "P-REGULAR",
+              "margin_pct": 0.2,
+              "on_hand": 140.0,
+              "quantity_packs": 70.0,
+              "quantity_units": 70.0,
+              "unit_of_sale": "unidade",
+              "value_rs": 560.0
+            },
+            {
+              "adjustments": [
+                "arredondado para cima (fardo)",
+                "teto de validade (7d) menor que a janela de risco (21d); ciclo de compra incompatível com a família -- piso de 21d aplicado no lugar da validade; cortado de 350.00 para 298.55 unidades -- teto efetivo de 21 dias de cobertura (posição atual 679.00 unidades, demanda esperada 46.55 unidades/dia)"
+              ],
+              "category": "PRODUCE",
+              "coverage_days_after_order": 21.009621,
+              "in_transit": 0.0,
+              "is_exception": true,
+              "item_id": "P-TREND",
+              "margin_pct": 0.2,
+              "on_hand": 678.997863,
+              "quantity_packs": 299.0,
+              "quantity_units": 299.0,
+              "unit_of_sale": "unidade",
+              "value_rs": 2392.0
+            }
+          ],
+          "main": [],
+          "min_order_value": 0.0,
+          "outcome": "pedido_emitido",
+          "supplier_id": "SUP-PRODUCE"
+        }
+      ]
+    },
+    "minimum_filled": {
+      "report": {
+        "category_floor_alert": null,
+        "counts": {
+          "item_novo": 2,
+          "limite_de_variacao": 1,
+          "restricao_de_caixa": 0,
+          "teto_de_cobertura": 4
+        },
+        "not_implemented": [
+          "promocao_prevista -- exige calendário promocional (Item.on_promo futuro/planejado); o canônico Favorita só carrega on_promo HISTÓRICO em sales.parquet (o que já aconteceu), nunca o que está planejado -- não dá pra reagir a uma promoção que o dado não anuncia com antecedência. Não implementada.",
+          "item_ancora -- exige análise de cesta (quais itens saem juntos, para proteger presença de item de entrada mesmo com margem comprimida) -- fora de escopo da v1 (Item.is_anchor é 100% nulo no canônico, Sprint 3 D7). Não implementada."
+        ]
+      },
+      "suppliers": [
+        {
+          "category": "EGGS",
+          "exceptions": [
+            {
+              "adjustments": [
+                "arredondado para cima (fardo)",
+                "aumentado para bater pedido mínimo do fornecedor",
+                "aumentado para bater pedido mínimo do fornecedor",
+                "aumentado para bater pedido mínimo do fornecedor",
+                "aumentado para bater pedido mínimo do fornecedor",
+                "aumentado para bater pedido mínimo do fornecedor",
+                "teto de validade (14d) menor que a janela de risco (21d); ciclo de compra incompatível com a família -- piso de 21d aplicado no lugar da validade"
+              ],
+              "category": "EGGS",
+              "coverage_days_after_order": 23.692308,
+              "in_transit": 0.0,
+              "is_exception": true,
+              "item_id": "E-ONE",
+              "margin_pct": 0.17,
+              "on_hand": 182.0,
+              "quantity_packs": 21.0,
+              "quantity_units": 126.0,
+              "unit_of_sale": "unidade",
+              "value_rs": 1045.8
+            },
+            {
+              "adjustments": [
+                "arredondado para cima (fardo)",
+                "aumentado para bater pedido mínimo do fornecedor",
+                "aumentado para bater pedido mínimo do fornecedor",
+                "aumentado para bater pedido mínimo do fornecedor",
+                "aumentado para bater pedido mínimo do fornecedor",
+                "teto de validade (14d) menor que a janela de risco (21d); ciclo de compra incompatível com a família -- piso de 21d aplicado no lugar da validade"
+              ],
+              "category": "EGGS",
+              "coverage_days_after_order": 23.230769,
+              "in_transit": 0.0,
+              "is_exception": true,
+              "item_id": "E-TWO",
+              "margin_pct": 0.17,
+              "on_hand": 182.0,
+              "quantity_packs": 20.0,
+              "quantity_units": 120.0,
+              "unit_of_sale": "unidade",
+              "value_rs": 996.0
+            }
+          ],
+          "main": [],
+          "min_order_value": 2000.0,
+          "outcome": "pedido_emitido",
+          "supplier_id": "SUP-EGGS"
+        },
+        {
+          "category": "GROCERY I",
+          "exceptions": [
+            {
+              "adjustments": [
+                "arredondado para cima (fardo)",
+                "item novo -- quantidade fixa pela mediana da categoria (52.50 unidades), não pelo modelo (que sugeriria 22.93 unidades sobre histórico curto demais para confiar)"
+              ],
+              "category": "GROCERY I",
+              "coverage_days_after_order": 45.714286,
+              "in_transit": 0.0,
+              "is_exception": true,
+              "item_id": "G-NEW",
+              "margin_pct": 0.18,
+              "on_hand": 8.571429,
+              "quantity_packs": 5.0,
+              "quantity_units": 60.0,
+              "unit_of_sale": "unidade",
+              "value_rs": 492.0
+            },
+            {
+              "adjustments": [
+                "arredondado para cima (fardo)",
+                "sugestão de 286.78 unidades é 6.8x a média das compras dos últimos dias (42.29) -- acima do limite de 2x, sinalizado para revisão humana (quantidade NÃO alterada)"
+              ],
+              "category": "GROCERY I",
+              "coverage_days_after_order": 21.059438,
+              "in_transit": 0.0,
+              "is_exception": true,
+              "item_id": "G-SURGE",
+              "margin_pct": 0.18,
+              "on_hand": 143.718487,
+              "quantity_packs": 24.0,
+              "quantity_units": 288.0,
+              "unit_of_sale": "unidade",
+              "value_rs": 2361.6
+            }
+          ],
+          "main": [
+            {
+              "adjustments": [],
+              "category": "GROCERY I",
+              "coverage_days_after_order": null,
+              "in_transit": 0.0,
+              "is_exception": false,
+              "item_id": "G-DORMANT",
+              "margin_pct": 0.18,
+              "on_hand": 16.461039,
+              "quantity_packs": 0.0,
+              "quantity_units": 0.0,
+              "unit_of_sale": "unidade",
+              "value_rs": 0.0
+            },
+            {
+              "adjustments": [
+                "arredondado para cima (fardo)"
+              ],
+              "category": "GROCERY I",
+              "coverage_days_after_order": 21.2,
+              "in_transit": 0.0,
+              "is_exception": false,
+              "item_id": "G-REGULAR",
+              "margin_pct": 0.18,
+              "on_hand": 140.0,
+              "quantity_packs": 6.0,
+              "quantity_units": 72.0,
+              "unit_of_sale": "unidade",
+              "value_rs": 590.4
+            },
+            {
+              "adjustments": [
+                "arredondado para cima (fardo)"
+              ],
+              "category": "GROCERY I",
+              "coverage_days_after_order": 21.2,
+              "in_transit": 0.0,
+              "is_exception": false,
+              "item_id": "G-SMALL",
+              "margin_pct": 0.18,
+              "on_hand": 70.0,
+              "quantity_packs": 3.0,
+              "quantity_units": 36.0,
+              "unit_of_sale": "unidade",
+              "value_rs": 295.2
+            }
+          ],
+          "min_order_value": 0.0,
+          "outcome": "pedido_emitido",
+          "supplier_id": "SUP-GROCERY"
+        },
+        {
+          "category": "PRODUCE",
+          "exceptions": [
+            {
+              "adjustments": [
+                "arredondado para cima (fardo)",
+                "item novo -- quantidade fixa pela mediana da categoria (184.28 unidades), não pelo modelo (que sugeriria 0.00 unidades sobre histórico curto demais para confiar)"
+              ],
+              "category": "PRODUCE",
+              "coverage_days_after_order": null,
+              "in_transit": 0.0,
+              "is_exception": true,
+              "item_id": "P-NEVER",
+              "margin_pct": 0.2,
+              "on_hand": 0.0,
+              "quantity_packs": 185.0,
+              "quantity_units": 185.0,
+              "unit_of_sale": "unidade",
+              "value_rs": 1480.0
+            },
+            {
+              "adjustments": [
+                "teto de validade (7d) menor que a janela de risco (21d); ciclo de compra incompatível com a família -- piso de 21d aplicado no lugar da validade"
+              ],
+              "category": "PRODUCE",
+              "coverage_days_after_order": 21.0,
+              "in_transit": 0.0,
+              "is_exception": true,
+              "item_id": "P-REGULAR",
+              "margin_pct": 0.2,
+              "on_hand": 140.0,
+              "quantity_packs": 70.0,
+              "quantity_units": 70.0,
+              "unit_of_sale": "unidade",
+              "value_rs": 560.0
+            },
+            {
+              "adjustments": [
+                "arredondado para cima (fardo)",
+                "teto de validade (7d) menor que a janela de risco (21d); ciclo de compra incompatível com a família -- piso de 21d aplicado no lugar da validade; cortado de 350.00 para 298.55 unidades -- teto efetivo de 21 dias de cobertura (posição atual 679.00 unidades, demanda esperada 46.55 unidades/dia)"
+              ],
+              "category": "PRODUCE",
+              "coverage_days_after_order": 21.009621,
+              "in_transit": 0.0,
+              "is_exception": true,
+              "item_id": "P-TREND",
+              "margin_pct": 0.2,
+              "on_hand": 678.997863,
+              "quantity_packs": 299.0,
+              "quantity_units": 299.0,
+              "unit_of_sale": "unidade",
+              "value_rs": 2392.0
+            }
+          ],
+          "main": [],
+          "min_order_value": 0.0,
+          "outcome": "pedido_emitido",
+          "supplier_id": "SUP-PRODUCE"
+        }
+      ]
+    }
+  }
+}
