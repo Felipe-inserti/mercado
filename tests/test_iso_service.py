@@ -18,6 +18,7 @@ import pytest
 from motor.config import load_params
 from motor.experiments.iso_service import (
     ARM2_ALPHA_GRID,
+    ARM2_CHOSEN_ALPHA,
     ARM3_ALPHA_GRID,
     CELL_ERP_FACTOR,
     CELL_ERP_MIN_ORDER_UNITS,
@@ -32,6 +33,13 @@ from motor.experiments.iso_service import (
 from motor.metrics.financial import PortfolioFinancialMetrics
 
 PARAMS_PATH = Path(__file__).resolve().parent.parent / "config" / "params.yaml"
+
+
+def test_purchase_list_alpha_matches_current_experiment_without_automatic_recalibration() -> None:
+    assert load_params(PARAMS_PATH).purchase_list.alpha == ARM2_CHOSEN_ALPHA, (
+        "O experimento foi recalibrado: alterar o alpha da lista é uma decisão "
+        "a tomar com o dado real, não uma atualização automática."
+    )
 
 
 @pytest.fixture(scope="module")

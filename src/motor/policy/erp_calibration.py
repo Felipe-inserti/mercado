@@ -37,11 +37,11 @@ from statistics import mean
 
 import polars as pl
 
-from motor.experiments.shared import build_simulator_for_pair
 from motor.features.censoring import drop_censored
 from motor.forecast.naive import NaiveForecaster
 from motor.policy.erp_baseline import ErpBaselinePolicy, daily_average_from_history
 from motor.simulator.engine import review_every_n_days
+from motor.simulator.pair import build_simulator_for_pair
 
 
 @dataclass(frozen=True)

@@ -25,14 +25,11 @@ from motor.config import (
 from motor.experiments.run import (
     ExistingResultError,
     RunManifest,
-    StaleSubsetSelectionError,
     _build_forecaster,
     _build_manifest,
     _build_policy,
     _find_arm,
     _quantile_gbm_retrain_dates,
-    _selection_params_hash,
-    load_or_select_subset,
     run_arm,
     run_arm_and_save,
 )
@@ -41,6 +38,11 @@ from motor.forecast.statistical import StatisticalForecaster
 from motor.policy.basestock import BasestockPolicy
 from motor.policy.erp_baseline import ErpBaselinePolicy
 from motor.selection import SubsetSelectionResult
+from motor.selection_cache import (
+    StaleSubsetSelectionError,
+    _selection_params_hash,
+    load_or_select_subset,
+)
 from motor.simulator.engine import review_every_n_days
 
 PARAMS_PATH = Path(__file__).resolve().parent.parent / "config" / "params.yaml"

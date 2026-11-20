@@ -23,7 +23,9 @@ CANONICAL_TABLES: tuple[str, ...] = ("sales", "items", "suppliers", "stock")
 # Seções de `Params` que NÃO entram no hash: adicionadas por sprints
 # posteriores, não são lidas pelos braços 1 e 2 (a 24.1 acrescenta
 # `mercado_piloto` ao params.yaml e não pode quebrar a regressão).
-EXCLUDED_PARAMS_SECTIONS: frozenset[str] = frozenset({"mercado_piloto"})
+# A Sprint 25 acrescenta `purchase_list`, lida só pela lista de compra,
+# não pelos braços 1 e 2; a nova seção não pode quebrar a regressão.
+EXCLUDED_PARAMS_SECTIONS: frozenset[str] = frozenset({"mercado_piloto", "purchase_list"})
 
 EVENTS_KEYS: tuple[str, ...] = ("store_id", "item_id", "day")
 ITEM_METRICS_KEYS: tuple[str, ...] = ("item_id",)

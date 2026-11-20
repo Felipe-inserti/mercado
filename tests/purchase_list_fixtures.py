@@ -17,8 +17,7 @@ from typing import Any
 import polars as pl
 
 from motor.config import Params, load_params
-from motor.experiments.iso_service import CanonicalTables
-from motor.experiments.run import _selection_params_hash
+from motor.io.canonical import CanonicalTables
 from motor.io.contracts import (
     Item,
     Sale,
@@ -28,6 +27,7 @@ from motor.io.contracts import (
     expected_polars_schema,
 )
 from motor.reporting.purchase_list import GuardrailFiringReport, SupplierPurchaseList
+from motor.selection_cache import _selection_params_hash
 
 PARAMS_PATH = Path(__file__).resolve().parents[1] / "config" / "params.yaml"
 
@@ -157,6 +157,30 @@ def params_with_budget(params: Params, weekly_budget_rs: float) -> Params:
     payload = params.model_dump()
     payload["guardrails"]["weekly_budget_rs"] = weekly_budget_rs
     return Params.model_validate(payload)
+
+
+def build_supplier_timing_scenario(tmp_path: Path) -> PurchaseListScenario:
+    """Variante independente do golden, com prazos diferentes e overrides nulos."""
+    scenario = build_purchase_list_scenario(tmp_path)
+    timings = {
+        "SUP-GROCERY": (2, 7),
+        "SUP-PRODUCE": (5, 14),
+        "SUP-EGGS": (3, 7),
+        "SUP-CLOSED": (4, 7),
+    }
+    rows = []
+    for row in scenario.tables.suppliers.iter_rows(named=True):
+        lead, review = timings[row["supplier_id"]]
+        rows.append({**row, "lead_time_days": lead, "review_period_days": review})
+    suppliers = pl.DataFrame(rows, schema=expected_polars_schema(Supplier))
+    payload = scenario.params.model_dump()
+    payload["purchase_list"]["lead_time_days_override"] = None
+    payload["purchase_list"]["review_period_days_override"] = None
+    return replace(
+        scenario,
+        params=Params.model_validate(payload),
+        tables=replace(scenario.tables, suppliers=suppliers),
+    )
 
 
 def characterization_cases(scenario: PurchaseListScenario) -> dict[str, PurchaseListScenario]:

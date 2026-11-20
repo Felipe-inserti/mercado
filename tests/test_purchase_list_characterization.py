@@ -13,7 +13,6 @@ from typing import Any
 import pytest
 
 from motor.config import Params, load_params
-from motor.experiments.run import _selection_params_hash, load_or_select_subset
 from motor.io.contracts import (
     ITEMS_PRIMARY_KEY,
     SALES_PRIMARY_KEY,
@@ -35,6 +34,7 @@ from motor.reporting.purchase_list import (
     SupplierPurchaseList,
     generate_purchase_list,
 )
+from motor.selection_cache import _selection_params_hash, load_or_select_subset
 from tests.purchase_list_fixtures import (
     PARAMS_PATH,
     PurchaseListScenario,
@@ -219,7 +219,8 @@ def test_cash_constraint_cuts_quantity_and_keeps_audit_trail(
     assert cuts
     assert all(row.quantity_units == 0.0 and row.value_rs == 0.0 for row in cuts)
     assert all(row.is_exception and original[row.item_id].quantity_units > 0.0 for row in cuts)
-    budget = scenarios[name].params.guardrails.weekly_budget_rs * 2
+    params = scenarios[name].params
+    budget = params.guardrails.weekly_budget_rs * params.purchase_list.budget_period_days / 7
     assert sum(row.value_rs for row in final.values()) <= budget
     assert outputs[name][1].counts[GuardrailReason.RESTRICAO_DE_CAIXA] >= len(cuts)
     assert outputs["default"][1].counts[GuardrailReason.RESTRICAO_DE_CAIXA] == 0

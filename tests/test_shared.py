@@ -1,10 +1,10 @@
-"""Testes de `motor.experiments.shared` (premissas compartilhadas, Sprint 7)."""
+"""Testes de `motor.simulator.pair` (premissas compartilhadas, Sprint 7)."""
 
 from datetime import date, timedelta
 
 import polars as pl
 
-from motor.experiments.shared import build_simulator_for_pair, initial_stock_units
+from motor.simulator.pair import build_simulator_for_pair, initial_stock_units
 from tests.fakes import ConstantForecaster, OrderUpToPolicy
 
 D0 = date(2026, 1, 1)
@@ -121,7 +121,7 @@ def test_build_simulator_for_pair_revisa_a_cada_review_period_days() -> None:
 
 def test_build_simulator_for_pair_nao_perece_nenhum_item() -> None:
     # shelf_life_from_arrival_days=None para todo item -- premissa declarada
-    # da Sprint 7 (ver docstring de motor.experiments.shared).
+    # da Sprint 7 (ver docstring de motor.simulator.pair).
     demand = _demand_constante(dias=40, valor=10.0)
     simulator = build_simulator_for_pair(
         demand=demand,

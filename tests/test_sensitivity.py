@@ -16,8 +16,8 @@ from motor.config import load_params
 from motor.experiments.sensitivity import (
     build_cell_params,
     cell_dir,
-    override_supplier_lead_time,
 )
+from motor.io.supplier_overrides import override_supplier_lead_time
 
 PARAMS_PATH = Path(__file__).resolve().parent.parent / "config" / "params.yaml"
 

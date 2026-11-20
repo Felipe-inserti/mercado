@@ -111,7 +111,7 @@ _REVIEW_PERIOD_JUSTIFICATIVA = (
 )
 
 _ESTOQUE_INICIAL_JUSTIFICATIVA = (
-    "Fórmula (motor.experiments.shared.initial_stock_units), não um número solto: "
+    "Fórmula (motor.simulator.pair.initial_stock_units), não um número solto: "
     "avg_daily_demand(warmup) x (lead_time_days + review_period_days) -- a demanda "
     "média é MEDIDA (observada nos primeiros warmup_days dias reais de cada item), "
     "mas a REGRA de cobertura (cobrir exatamente um ciclo de risco) é uma escolha "

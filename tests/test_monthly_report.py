@@ -1,4 +1,4 @@
-"""Testes de `motor.reporting.monthly_report` (Sprint 19, Fase 4).
+"""Testes de `motor.experiments.monthly_report` (Sprint 19, Fase 4).
 
 Só a parte pura/de leitura (`n_months_no_periodo`, `mensalizar`,
 `ruptura_evitada`, `capital_liberado`, `perda_evitada`,
@@ -25,8 +25,8 @@ from pathlib import Path
 import polars as pl
 import pytest
 
+from motor.experiments import monthly_report as mr
 from motor.experiments import stale_baseline as sb
-from motor.reporting import monthly_report as mr
 
 
 def _write_erp_manifest(
