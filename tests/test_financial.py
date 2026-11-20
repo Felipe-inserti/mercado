@@ -359,3 +359,42 @@ def test_daily_net_margin_soma_entre_itens_no_mesmo_dia() -> None:
     result = daily_net_margin(events_df, economics, evaluation_start=D0)
     assert result.height == 1  # um dia só
     assert result["net_margin_rs"][0] == pytest.approx((5.0 + 3.0) * (_PRICE - _COST))
+
+
+def test_financial_losses_and_margin_match_exact_manual_totals_excluding_warmup() -> None:
+    """Dois itens, dois dias avaliados e aquecimento com valores monetários não nulos."""
+    evaluation_start = D0 + timedelta(days=1)
+    events = pl.DataFrame(
+        {
+            "item_id": ["A", "A", "A", "B", "B", "B"],
+            "day": [D0, evaluation_start, D0 + timedelta(days=2)] * 2,
+            "demand": [100.0, 10.0, 8.0, 80.0, 6.0, 5.0],
+            "sold": [50.0, 7.0, 4.0, 30.0, 5.0, 2.0],
+            "unmet_demand": [50.0, 3.0, 4.0, 50.0, 1.0, 3.0],
+            "expired": [20.0, 2.0, 1.0, 10.0, 1.0, 2.0],
+            "on_hand_end": [100.0, 8.0, 4.0, 200.0, 5.0, 3.0],
+        }
+    )
+    economics = pl.DataFrame({"item_id": ["A", "B"], "price": [10.0, 10.0], "cost": [7.0, 8.0]})
+    # A: margem=(7+4)*(10-7)=33; ruptura=(3+4)*(10-7)=21; perda=(2+1)*7=21.
+    # B: margem=(5+2)*(10-8)=14; ruptura=(1+3)*(10-8)=8; perda=(1+2)*8=24.
+    # Totais: margem=47; ruptura=29; perda=45. Aquecimento EXCLUÍDO:
+    # acrescentaria margem=50*3+30*2=210, ruptura=50*3+50*2=250,
+    # perda=20*7+10*8=220. Os valores inteiros permitem igualdade exata.
+    by_item = (
+        compute_financial_metrics(
+            events, economics, evaluation_start=evaluation_start, capital_cost_annual=0.15
+        )
+        .select("item_id", "ruptura_rs", "perda_rs", "margem_realizada_rs")
+        .sort("item_id")
+    )
+    assert by_item.to_dicts() == [
+        {"item_id": "A", "ruptura_rs": 21.0, "perda_rs": 21.0, "margem_realizada_rs": 33.0},
+        {"item_id": "B", "ruptura_rs": 8.0, "perda_rs": 24.0, "margem_realizada_rs": 14.0},
+    ]
+    portfolio = compute_portfolio_metrics(
+        events, economics, evaluation_start=evaluation_start, capital_cost_annual=0.15
+    )
+    assert portfolio.ruptura_rs == 29.0
+    assert portfolio.perda_rs == 45.0
+    assert portfolio.margem_realizada_rs == 47.0

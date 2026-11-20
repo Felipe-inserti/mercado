@@ -94,3 +94,6 @@ markers = [
 
 [tool.coverage.run]
 source = ["src/motor"]
+
+[tool.coverage.report]
+fail_under = 86

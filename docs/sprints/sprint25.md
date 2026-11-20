@@ -1,10 +1,11 @@
 # Sprint 25 — Motor pronto para o dado real
 
 Execução parcial em **20/11/2026**. Rodada 1: **Fases 0 e 1**, commitadas pelo
-Rafael em `74383fe`. Rodada 2: **Fases 2 e 3**, autorizadas na nova mensagem.
+Rafael em `74383fe`. Rodada 2: **Fases 2 e 3**, commitadas em `fbcfce3`.
+Rodada 3: **Fases 4 a 7**, conforme pedido anexado pelo Rafael.
 Especificação: `PROMPT_CODEX_sprint25.md`; `EXECUTAR_FASE_BACKTEST: não`.
 O agente não executa commits. O registro da rodada 1 abaixo é histórico;
-os resultados da rodada 2 são acrescentados ao final.
+os resultados das rodadas seguintes são acrescentados ao final.
 
 Vale o contrato de `CLAUDE.md`, exceto graphify (inexistente nesta máquina), e
 as regras R1–R14 da especificação. Na rodada 1, o desenho autorizado foi
@@ -493,3 +494,320 @@ Mensagens de commit sugeridas, sem executá-las:
 - Fase 3: `refactor: separar utilitários de produto dos experimentos`.
 
 **Ponto de parada da rodada 2: Fases 2 e 3 concluídas. Fase 4 não iniciada.**
+
+## Estado de partida da rodada 3
+
+- Branch conferida primeiro: `feat/correcoes-motor`; HEAD `fbcfce3`.
+- `git status`: `nothing to commit, working tree clean`.
+- Relidas R1-R14, `CLAUDE.md`, este registro e o pedido completo da rodada 3.
+- Mantidas `UV_NO_SYNC=1`, `UV_NO_CACHE=1`, `PYTHONDONTWRITEBYTECODE=1`.
+- Golden inicial: `108bb537631c9bcfed216c41b26e723ea9d0f187a98778c17ea2c1445f42c125`.
+- Proteção adicional desta rodada: runner, iso-serviço, shared, sensibilidade,
+  stale-baseline e diretórios simulator/policy/forecast/features não podem
+  mudar, pois Felipe executa a regressão da rodada 2 em paralelo.
+- Inventário de asserts: purchase_list:361, monthly_report:219,
+  quality_report:270 e run:403. Há conflito entre incluir todos na Fase 5 e
+  a proibição de editar run.py; esclarecimento solicitado ao Rafael,
+  enquanto a Fase 4 segue independentemente. Nenhuma exceção presumida.
+
+| Comando de partida | Resultado real |
+|---|---|
+| `uv run pytest -q --cov=motor --cov-branch --cov-report=term-missing` | **493 passed, 1 skipped, 3 deselected in 53.76s**; total **81%**, purchase_list **92%**, mensal **28%**, raw **62%** (linhas e desvios combinados) |
+| `uv run pytest -q --no-cov --durations=15` | **493 passed, 1 skipped, 3 deselected in 27.69s** |
+
+O comando de cobertura emitiu o aviso preexistente de módulo motor importado
+antes da medição. Sem supressão. Cobertura de linhas registrada na rodada 2:
+total 81,6728%, lista 92,4157%, mensal 31,8182%, raw 63,3333%.
+
+15 durações mais lentas na partida:
+
+```text
+9.31s setup test_purchase_list_characterization.py::test_generate_purchase_list_matches_complete_golden[default]
+4.16s call  test_purchase_list_configuration.py::test_excel_notes_use_configured_overrides_and_alpha
+3.65s call  test_purchase_list_configuration.py::test_null_overrides_use_each_supplier_risk_window_and_excel_note
+2.31s call  test_quantile_gbm.py::test_embaralhamento_desempenho_cai_ao_nivel_trivial
+2.29s call  test_purchase_list_configuration.py::test_budget_period_is_independent_of_supplier_review
+1.82s call  test_quantile_gbm.py::test_cobertura_empirica_por_quantil_no_periodo_simulado
+0.38s call  test_censoring.py::test_purchase_list_com_censura_usa_historico_censurado
+0.17s call  test_quantile_gbm.py::test_nenhuma_linha_de_treino_usa_informacao_futura_ate_o_fit
+0.14s call  test_architecture.py::test_purchase_list_import_does_not_load_lightgbm
+0.13s call  test_purchase_list.py::test_item_decision_accepts_unmodified_repository_params
+0.12s call  test_quantile_gbm.py::test_cache_mesmo_estado_com_cache_quente
+0.11s call  test_architecture.py::test_product_helpers_import_without_lightgbm[motor.io.canonical]
+0.11s call  test_architecture.py::test_product_helpers_import_without_lightgbm[motor.simulator.pair]
+0.09s call  test_quantile_gbm.py::test_precompute_predictions_bate_exato_com_calculo_item_a_item
+0.08s call  test_loaders.py::test_idempotencia
+```
+
+## Fase 4 — proteção das fórmulas financeiras
+
+**Concluída.** Apenas acrescentado um teste em `tests/test_financial.py`.
+Dois itens, dois dias avaliados e um dia de aquecimento, todos os campos
+com valores que distinguem venda, demanda, margem, preço e custo.
+Contas manuais no comentário e igualdade exata por item e no agregado:
+
+| Item | Margem realizada | Ruptura | Perda |
+|---|---:|---:|---:|
+| A (preço 10, custo 7) | (7+4)*3 = 33 | (3+4)*3 = 21 | (2+1)*7 = 21 |
+| B (preço 10, custo 8) | (5+2)*2 = 14 | (1+3)*2 = 8 | (1+2)*8 = 24 |
+| Total avaliado | 47 | 29 | 45 |
+
+O warmup acrescentaria 210, 250 e 220 respectivamente; não entra nas contas.
+
+Todos os textos exatos dos três mutantes foram encontrados uma única vez.
+Para cada um: `cp` para `/tmp/financial_backup.py`, aplicação isolada,
+`uv run pytest -q -x --no-cov tests/test_financial.py`, restauração com `cp`
+em bloco `finally` e `git diff --exit-code src/motor/metrics/financial.py`
+com retorno 0. Também rodado o teste novo isoladamente em cada mutação:
+os três retornaram 1 com falha de assert. Nenhum mutante sobreviveu; não foi
+necessário executar a suíte inteira mutada. Backup apagado ao concluir.
+
+| Mutante | Primeiro teste que o matou no comando obrigatório | Mensagem/valor da falha |
+|---|---|---|
+| M1 — ruptura por preço | `test_financial_losses_and_margin_match_exact_manual_totals_excluding_warmup` | Item A: `ruptura_rs: 70.0` em vez de `21.0`; `1 failed, 13 passed in 0.24s` |
+| M2 — perda por preço | `test_daily_net_margin_e_margem_menos_perda_por_dia` (preexistente) | `Obtained: -50.0; Expected: -40.0 ± 4.0e-05`; `1 failed, 11 passed in 0.13s`; novo teste isolado também matou M2 |
+| M3 — margem por demanda | `test_financial_losses_and_margin_match_exact_manual_totals_excluding_warmup` | Item A: `margem_realizada_rs: 54.0` em vez de `33.0`; `1 failed, 13 passed in 0.13s` |
+
+| Verificação da Fase 4 | Resultado |
+|---|---|
+| Financeiro sem mutante (`--no-cov`) | 14 passed in 0.24s |
+| `uv run pytest -q` | **494 passed, 1 skipped, 3 deselected in 48.67s** |
+| `uv run ruff check .` | All checks passed! |
+| `uv run ruff format --check .` | 101 files already formatted |
+| `uv run mypy src/` | Success: no issues found in 47 source files |
+
+
+## Esclarecimento de escopo da Fase 5
+
+Rafael respondeu explicitamente: **"Preservar run.py nesta rodada"**.
+Portanto o assert de `experiments/run.py:403` será mantido. Serão trocados
+os três asserts em arquivos autorizados. O item final (c), grep global
+vazio, terá esta exceção de escopo registrada, sem declarar zero ocorrências.
+
+## Fase 5 — exceções explícitas em produto
+
+**Concluída no escopo confirmado pelo Rafael.** Em cada função abaixo,
+somente o assert foi substituído por `if not isinstance`, `TypeError` e
+mensagem em português. Não houve outra mudança de lógica nessas funções.
+
+| Função | Mensagem verificada pelo teste novo |
+|---|---|
+| `purchase_list._first_sale_and_days_with_sales` | `A primeira data de venda deve ser uma data válida.` |
+| `monthly_report.n_months_no_periodo` | `simulation_window.n_evaluation_days deve ser um inteiro.` |
+| `quality_report._active_items` | `sales.date deve conter uma data válida para identificar os itens ativos.` |
+
+`tests/test_product_validation.py` provoca as três exceções e confere as
+mensagens exatas. Mypy preserva o estreitamento de tipo. O único assert
+restante é `experiments/run.py:403`, preservado por instrução explícita.
+
+| Verificação da Fase 5 | Resultado |
+|---|---|
+| `uv run pytest -q` | **497 passed, 1 skipped, 3 deselected in 48.29s**; golden aprovado |
+| `uv run ruff check .` | All checks passed! |
+| `uv run ruff format --check .` | 102 files already formatted |
+| `uv run mypy src/` | Success: no issues found in 47 source files |
+| Diffs financeiro, golden e runner | Vazios, retorno 0 |
+| Grep global de asserts | Uma ocorrência, no runner protegido |
+
+## Fase 6 — determinismo ponta a ponta
+
+**Concluída.** Novo `tests/test_reporting_determinism.py`, com fixture de
+escopo module que roda `generate_purchase_list` exatamente duas vezes.
+Os dois testes da lista reutilizam essas saídas; não repetem simulações.
+Comparações da serialização e das estruturas completas passaram.
+
+Os testes de bytes gravam em diretórios diferentes e separam as gravações
+por 1,1 s, evitando aprovação acidental no mesmo segundo do relógio.
+Antes da correção: **2 failed, 1 passed in 8.16s**. Nos dois relatórios,
+o único membro ZIP divergente era `docProps/core.xml`: campos `created` e
+`modified` variavam com o relógio (por exemplo 21:47:22Z -> 21:47:23Z).
+Inspeção do código instalado confirmou o fallback de XlsxWriter para
+`datetime.now` quando `created` não é um datetime.
+
+Correção autorizada, sem mudar conteúdo de células, texto ou formato:
+
+- Lista: `workbook.set_properties` com `datetime.combine(as_of, time.min)`.
+- Mensal: mesma propriedade, derivada do `end` do período simulado já
+  carregado em `_ReportData` (não do relógio). Nenhum cálculo foi alterado.
+- Nenhuma assinatura de função alterada.
+
+O mensal pôde ser gerado inteiramente com arquivos sintéticos. Novo builder
+`tests/monthly_report_fixtures.py`, reutilizável na Fase 7: todos os caminhos
+de monthly/stale-baseline são redirecionados em memória para tmp_path, com
+restauração automática. O arquivo stale_baseline.py permanece intocado.
+
+| Verificação da Fase 6 | Resultado |
+|---|---|
+| `uv run pytest -q --no-cov --durations=5 tests/test_reporting_determinism.py` | **3 passed in 7.92s**, abaixo de 30 s; setup 4.76s, bytes mensal 1.15s, bytes lista 1.15s |
+| `uv run pytest -q` | **500 passed, 1 skipped, 3 deselected in 59.26s**; total 87%, lista 92%, mensal 98% (linhas) |
+| `uv run ruff check .` | All checks passed! |
+| `uv run ruff format --check .` | 104 files already formatted |
+| `uv run mypy src/` | Success: no issues found in 47 source files |
+
+## Fase 7 — cobertura do relatório e limite contra regressão
+
+**Concluída.** Oito novos testes em `tests/test_monthly_report_workbook.py`,
+com builder sintético compartilhado e fixtures de escopo module. O workbook
+é gerado uma vez para os testes de células. `tests/xlsx_assertions.py` lê
+os XMLs do XLSX com a biblioteca padrão, sem nova dependência.
+
+Arquivos mínimos criados exclusivamente dentro do diretório temporário:
+
+| Caminho sob o tmp_path | Formato/campos efetivamente consumidos |
+|---|---|
+| `results/sensibilidade_dirigida/{lt3_rp7,lt5_rp7}/erp_baseline/manifest.json` | `erp_baseline_calibration.factor/min_order_units`, fontes da calibração antiga |
+| `results/sensibilidade_dirigida/lt7_rp14/erp_baseline/manifest.json` | Calibração com moving_average_weeks; portfolio com serviço, decision_metric e capital; simulation_window com início/fim/dias avaliados |
+| Mesmo diretório, `item_metrics.parquet` | Três itens com margem realizada, ruptura e perda |
+| `results/baseline_desatualizado/{calibrado_lt3_rp7,calibrado_lt5_rp7}/erp_baseline/{manifest.json,item_metrics.parquet}` | Portfolio e métricas monetárias de cada baseline antigo |
+| `results/iso_servico/arm2_alpha_grid.parquet` | alpha, serviço, decision_metric, capital |
+| `results/iso_servico/item_decomposition_alpha066.parquet` | item_id, preço, custo, margem percentual, serviço, margem realizada, ruptura e perda |
+| `canonical/items.parquet` | item_id, category, unit_of_sale; somente os campos usados pelo drilldown do relatório |
+| `config/params.yaml` | Cópia validável dos parâmetros; somente canonical_dir aponta para o diretório sintético |
+
+Nenhuma leitura/escrita em results/ ou data/ reais. O teste da CLI roda com
+cwd no diretório temporário, onde os defaults relativos encontram esses
+arquivos. Os testes em processo redirecionam as constantes existentes com
+MonkeyPatch de contexto e restauram-nas ao sair.
+
+**Assinaturas alteradas: nenhuma.** Não foi necessário acrescentar parâmetros
+de caminho. Na Fase 7 não houve alteração no código de monthly_report.py;
+as únicas diferenças desse arquivo na rodada são a guarda da Fase 5 e o
+metadado da Fase 6. Cálculos, texto e formato foram preservados.
+
+Comportamentos verificados:
+
+- Sete abas, na ordem original, e cabeçalhos legíveis.
+- Totais exatos do motor: margem 950, ruptura 150; recalibrado: margem 900,
+  ruptura 200; período de 60 dias -> 2 meses.
+- Resumo: ruptura evitada mensal 175, aumento de capital mensal 250,
+  capital liberado mensal 50, margem adicional mensal 25; serviço e razões
+  conferidos em células específicas.
+- As duas magnitudes do Andar 1, aumento de capital e sensibilidade
+  245/350/455, com os textos de -30%, medida e +30%.
+- Andar 2: capital liberado 100 no período, 12,5%, razões e nota de margem.
+- Itens ordenados A/B/C por ruptura 100/40/10, apesar da entrada B/C/A;
+  percentuais 25%/20%/2%, venda por kg, custo, preço, margem e nota de top 20.
+- Premissas por categoria ordenadas, valores/default, notas de aceitação e
+  limitações. As notas originais não foram reescritas.
+- CLI real: stdout e bytes idênticos ao workbook gerado em processo.
+
+Testes focados do workbook: **8 passed in 1.62s**. Antes de ativar o piso,
+medição completa com branch: **508 passed, 1 skipped, 3 deselected in
+66.42s**; cobertura combinada exata **86,09515996718622%**. Por isso foi
+acrescentado somente `[tool.coverage.report] fail_under = 86`, o valor
+arredondado para baixo do mesmo comando de aceitação com desvios.
+Nenhuma outra configuração de pytest/coverage ou dependência mudou.
+
+O total já superou 85% após o relatório mensal; não foi necessário ampliar
+os testes de raw.py. Esse módulo permanece integralmente congelado.
+
+## Verificação final — rodada 3
+
+`uv run pytest -q --cov=motor --cov-branch --cov-report=term-missing`,
+com o fail_under ativo (linhas selecionadas da saída real):
+
+```text
+Name                                      Stmts   Miss Branch BrPart  Cover   Missing
+src/motor/experiments/monthly_report.py     334      6     46      1    98%   834-840, 844
+src/motor/io/raw.py                          90     33     30      2    62%   134, 189-223, 250-266, 270-280, 284
+src/motor/reporting/purchase_list.py        359     27     80      1    92%   1086-1140, 1144
+TOTAL                                      4074    526    802     50    86%
+Required test coverage of 86.0% reached. Total coverage: 86.10%
+508 passed, 1 skipped, 3 deselected in 67.36s (0:01:07)
+```
+
+Aviso preexistente de módulo importado antes da medição permaneceu visível;
+nenhuma supressão. Valores exatos de linhas, separados da cobertura combinada:
+
+| Medida | Partida | Final |
+|---|---:|---:|
+| Testes aprovados | 493 | 508 (+15) |
+| Total de linhas | 81,6728% (3320/4065) | 87,0889% (3548/4074) |
+| Lista de compra | 92,4157% (329/356) | 92,4791% (332/359) |
+| Relatório mensal | 31,8182% (105/330) | 98,2036% (328/334) |
+| Raw | 63,3333% (57/90) | 63,3333% (57/90) |
+| type: ignore em src/ | 39 | 39 |
+| asserts em src/ | 4 | 1 (runner preservado por decisão do Rafael) |
+| Falhas / erros / falhas esperadas | 0 / 0 / 0 | 0 / 0 / 0 |
+| Tempo sem cobertura | 27,69 s | 36,23 s |
+| Tempo com branch | 53,76 s | 67,36 s |
+
+`uv run pytest -q --no-cov --durations=15`:
+
+```text
+============================= slowest 15 durations =============================
+9.00s setup    tests/test_purchase_list_characterization.py::test_generate_purchase_list_matches_complete_golden[default]
+5.26s call     tests/test_purchase_list_configuration.py::test_excel_notes_use_configured_overrides_and_alpha
+4.71s setup    tests/test_reporting_determinism.py::test_purchase_list_decisions_are_identical_across_runs
+3.58s call     tests/test_purchase_list_configuration.py::test_null_overrides_use_each_supplier_risk_window_and_excel_note
+2.33s call     tests/test_purchase_list_configuration.py::test_budget_period_is_independent_of_supplier_review
+2.26s call     tests/test_quantile_gbm.py::test_embaralhamento_desempenho_cai_ao_nivel_trivial
+1.89s call     tests/test_quantile_gbm.py::test_cobertura_empirica_por_quantil_no_periodo_simulado
+1.14s call     tests/test_reporting_determinism.py::test_monthly_workbook_bytes_are_identical_across_clock_seconds
+1.12s call     tests/test_reporting_determinism.py::test_purchase_workbook_bytes_are_identical_across_clock_seconds
+0.61s call     tests/test_monthly_report_workbook.py::test_monthly_cli_uses_only_synthetic_default_relative_paths
+0.38s call     tests/test_censoring.py::test_purchase_list_com_censura_usa_historico_censurado
+0.17s call     tests/test_quantile_gbm.py::test_nenhuma_linha_de_treino_usa_informacao_futura_ate_o_fit
+0.13s call     tests/test_purchase_list.py::test_item_decision_accepts_unmodified_repository_params
+0.13s call     tests/test_architecture.py::test_purchase_list_import_does_not_load_lightgbm
+0.12s call     tests/test_quantile_gbm.py::test_cache_mesmo_estado_com_cache_quente
+508 passed, 1 skipped, 3 deselected in 36.23s
+```
+
+Outras saídas reais, após a implementação final:
+
+```text
+uv run ruff check .
+All checks passed!
+uv run ruff format --check .
+106 files already formatted
+uv run mypy src/
+Success: no issues found in 47 source files
+grep -rn "type: ignore" src | wc -l
+      39
+```
+
+## Autorrevisão (a)-(j) — rodada 3
+
+| Item | Resultado e evidência |
+|---|---|
+| (a) Financeiro intacto | ✅ `git diff --exit-code src/motor/metrics/financial.py`: retorno 0 após cada restauração e no fim |
+| (b) Mutantes | ✅ M1/M2/M3 mortos, tabela da Fase 4; o novo teste isolado matou os três |
+| (c) Grep global de asserts vazio | ❌ Uma ocorrência: `src/motor/experiments/run.py:403`. Exceção de escopo decidida pelo Rafael: "Preservar run.py nesta rodada"; outros três removidos e testados |
+| (d) Golden | ✅ Quatro snapshots passam; `git diff --exit-code tests/golden/`: retorno 0. SHA-256 preservado: `108bb537631c9bcfed216c41b26e723ea9d0f187a98778c17ea2c1445f42c125` |
+| (e) Congelados/contexto | ✅ Diffs dos oito congelados e dos cinco experimentos protegidos/diretórios simulator, policy, forecast, features: retorno 0. Monthly só com guarda/metadado autorizados |
+| (f) Params | ✅ `git diff --exit-code config/params.yaml`: retorno 0 |
+| (g) Supressões | ✅ Nenhuma nova; 39 ignores, sem aumento; sem noqa/pragma/skip/xfail/omit novo; pytest/coverage só ganhou fail_under |
+| (h) Cobertura/piso | ✅ Lista 92,4791%, mensal 98,2036%, total de linhas 87,0889%, combinado 86,0952%; fail_under 86 ativo e testado |
+| (i) Tempo | ✅ 67,36 s com branch e 36,23 s sem cobertura, ambos <= 90 s; determinismo isolado 7,92 s, abaixo de 30 s |
+| (j) Temporários | ✅ `/tmp/financial_backup.py` removido em finally; nenhum script auxiliar gravado em /tmp. Arquivos de teste ficam no tmp_path administrado pelo pytest |
+
+O único skip e as três desmarcações são preexistentes (dado real/regressão).
+A regressão do Favorita segue sob execução do Felipe, sem alteração local
+dos braços protegidos. Nenhuma decisão de negócio foi necessária nesta rodada.
+Não há assinatura de produto alterada nem mudança nos valores de params.yaml.
+
+Arquivos por fase:
+
+- Fase 4: `tests/test_financial.py` e este registro; financial.py só foi
+  mutado temporariamente e restaurado.
+- Fase 5: `src/motor/reporting/purchase_list.py`,
+  `src/motor/experiments/monthly_report.py`, `src/motor/io/quality_report.py`,
+  novo `tests/test_product_validation.py` e este registro.
+- Fase 6: as duas rotinas de Excel acima, novos
+  `tests/monthly_report_fixtures.py`, `tests/test_reporting_determinism.py`
+  e este registro.
+- Fase 7: fixture mensal ampliada para CLI, novos
+  `tests/test_monthly_report_workbook.py`, `tests/xlsx_assertions.py`,
+  `pyproject.toml` (somente o piso) e este registro.
+
+Mensagens de commit sugeridas, sem executá-las:
+
+- Fase 4: `test: proteger fórmulas financeiras com testes de mutação`.
+- Fase 5: `fix: validar explicitamente os tipos nos relatórios`.
+- Fase 6: `fix: tornar determinísticos os metadados dos relatórios Excel`.
+- Fase 7: `test: cobrir relatório mensal e fixar piso de cobertura em 86`.
+
+**Ponto de parada da rodada 3: Fases 4, 6 e 7 concluídas; Fase 5 concluída
+no escopo autorizado, com o assert do runner preservado. Fase 8 não iniciada.
+Nenhum commit executado.**

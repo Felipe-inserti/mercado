@@ -86,7 +86,7 @@ import argparse
 import statistics
 from collections import Counter
 from dataclasses import dataclass, replace
-from datetime import date, timedelta
+from datetime import date, datetime, time, timedelta
 from pathlib import Path
 from typing import Any, Final
 
@@ -358,7 +358,9 @@ def _first_sale_and_days_with_sales(demand: pl.DataFrame, as_of: date) -> tuple[
     if sold_days.height == 0:
         return None, 0
     first_sale = sold_days["date"].min()
-    assert isinstance(first_sale, date)
+    if not isinstance(first_sale, date):
+        msg = "A primeira data de venda deve ser uma data válida."
+        raise TypeError(msg)
     return first_sale, sold_days.height
 
 
@@ -980,6 +982,7 @@ def write_supplier_workbook(
     out_dir.mkdir(parents=True, exist_ok=True)
     path = out_dir / f"{supplier_list.supplier_id}.xlsx"
     workbook = xlsxwriter.Workbook(str(path))
+    workbook.set_properties({"created": datetime.combine(as_of, time.min)})
 
     header_format = workbook.add_format(
         {"bold": True, "bg_color": "#1f3864", "font_color": "white", "border": 1}

@@ -84,6 +84,7 @@ from __future__ import annotations
 import argparse
 import json
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Final
 
@@ -216,7 +217,9 @@ def _evaluation_window() -> dict[str, object]:
 
 def n_months_no_periodo() -> float:
     n_evaluation_days = _evaluation_window()["n_evaluation_days"]
-    assert isinstance(n_evaluation_days, int)
+    if not isinstance(n_evaluation_days, int):
+        msg = "simulation_window.n_evaluation_days deve ser um inteiro."
+        raise TypeError(msg)
     return n_evaluation_days / DAYS_PER_MONTH
 
 
@@ -782,6 +785,7 @@ def write_monthly_report_workbook(out_path: Path) -> Path:
     )
 
     data = _build_report_data()
+    workbook.set_properties({"created": datetime.fromisoformat(str(data.window["end"]))})
     _write_resumo_sheet(workbook, data, fmt)
     _write_andar1_sheet(workbook, data, fmt)
     _write_andar2_sheet(workbook, data, fmt)
