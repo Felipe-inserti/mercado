@@ -11,12 +11,12 @@ O produto não é um modelo de previsão. Previsão é um componente interno e s
 Consequência arquitetural direta: o simulador é o centro do sistema, não o modelo. Construímos o simulador primeiro, com uma previsão ingênua no lugar, e trocamos o modelo depois sem tocar em nada mais.
 
 2. Stack e convenções
-Python 3.11+
+Python 3.12
 polars para manipulação de dados (o volume não cabe confortavelmente em pandas). pandas só na fronteira com bibliotecas que exigem.
 lightgbm para previsão quantílica
 pydantic para configs e contratos de dados
 pytest para testes
-ruff + mypy (modo não estrito)
+ruff + mypy (modo strict)
 
 Regras:
 
@@ -27,40 +27,74 @@ Type hints obrigatórios em tudo que cruza fronteira de módulo.
 Determinismo: seed fixa em qualquer coisa estocástica. Rodar duas vezes produz bytes idênticos.
 Docstrings em português, identificadores em inglês.
 3. Estrutura do repositório
-config/
-  params.yaml            # todas as premissas
+```text
+config/params.yaml        # premissas numéricas
 src/motor/
+  config.py              # configuração validada
+  assumptions.py         # origem e registro das premissas
+  inventory.py           # estoque, pipeline e lotes
+  selection.py           # seleção do subconjunto
+  selection_cache.py     # cache e hash dos parâmetros de seleção
+  profiling.py           # perfil do dado canônico
   io/
-    contracts.py         # schemas pydantic das tabelas canônicas
-    loaders.py           # dataset bruto -> tabelas canônicas
+    contracts.py         # Sale, Item, Supplier, Stock e Entry
+    raw.py               # conversão e leitura do bruto
+    loaders.py           # bruto -> tabelas canônicas
+    canonical.py         # CanonicalTables e leitura dos quatro parquet
+    supplier_overrides.py # prazos explícitos ou preservação do cadastro
+    quality_report.py    # qualidade do dado de entrada
   features/
-    calendar.py          # feriado, dia da semana, início de mês, dia de pagamento
-    build.py             # lags, médias móveis, preço, promoção
+    calendar.py          # geografia e calendário de feriados
+    build.py             # lags, médias móveis, preço e promoção
+    censoring.py         # ruptura provável, só no histórico de previsão
   forecast/
     base.py              # Protocol Forecaster
-    naive.py             # média móvel + quantis empíricos dos resíduos
-    statistical.py       # sazonal simples + desvio
+    naive.py             # média móvel e resíduos
+    naive_seasonal.py    # mesma semana anterior e resíduos
+    statistical.py       # sazonalidade e nível recente
     quantile_gbm.py      # LightGBM com perda pinball
   policy/
-    base.py              # Protocol Policy, DecisionContext
-    erp_baseline.py      # média móvel 4 semanas + mínimo fixo
+    base.py              # Protocol Policy e DecisionContext
+    erp_baseline.py      # regra do ERP
+    erp_calibration.py   # calibração do baseline
     basestock.py         # nível-alvo por quantil
-    guardrails.py        # regras de guarda, aplicadas após a política
-    supplier.py          # fardo, pedido mínimo, calendário de entrega
-  sim/
-    state.py             # InventoryState (on hand, pipeline, lotes)
+    target_level.py      # cálculo de nível-alvo
+    guardrails.py        # quatro guardas implementadas
+    supplier.py          # fardo, mínimo e calendário
+  simulator/
     engine.py            # loop diário
+    pair.py              # construção do simulador por par loja-item
   metrics/
-    financial.py         # conversão de eventos para R$
+    financial.py         # conversão dos eventos para R$
+    forecast_quality.py  # qualidade da previsão
+  reporting/
+    purchase_list.py     # decisão e Excel por fornecedor
   experiments/
-    run.py               # roda um braço completo e salva resultados
-tests/
-notebooks/
+    run.py               # braços e manifestos
+    shared.py            # reexportações de compatibilidade
+    sensitivity.py       # cenários de sensibilidade
+    iso_service.py       # comparação iso-serviço
+    stale_baseline.py    # baseline desatualizado
+    monthly_report.py    # relatório mensal dos experimentos
+tests/                   # fixtures sintéticas, arquitetura e golden
+notebooks/               # exploração e gráficos
+docs/                    # sprints, decisões e coleta do piloto
+.github/workflows/ci.yml  # checks em push e pull_request
+```
+
 4. Tabelas canônicas
 
 Todo dataset de entrada é normalizado para estas quatro tabelas antes de qualquer coisa. Nenhum módulo abaixo de io/ conhece o formato original.
 
-sales — store_id, item_id, date, units, price, on_promo items — item_id, category, unit (each | kg), cost, supplier_id, is_anchor suppliers — supplier_id, lead_time_days, order_days (dias da semana), min_order_value, pack_multiple stock — store_id, item_id, date, on_hand — opcional, ausente em dado público
+Os campos e tipos atuais estão em `io/contracts.py` e em
+`docs/coleta/dicionario_de_dados.md`. O grão é loja-item-dia em `sales`
+(`units_sold`, devoluções separadas), item em `items` (`unit_of_sale` =
+`unidade` ou `kg`, `pack_multiple` por SKU), fornecedor em `suppliers`
+(prazos, dias de pedido e mínimos) e loja-item-dia em `stock` (saldo e
+trânsito). `stock` é opcional como fonte de negócio; o carregador canônico
+atual exige um parquet vazio tipado quando não houver dados. O contrato
+opcional `Entry` representa recebimentos; não é carregado automaticamente
+por `load_canonical_tables`.
 
 Se stock não existir, o sistema opera assumindo que as vendas observadas são a demanda. Isso deve ser registrado explicitamente na saída do experimento como uma premissa ativa, não escondido.
 
@@ -199,6 +233,9 @@ Pronto quando: o braço 2 (previsão estatística + nível-alvo) roda e é compa
 
 Emenda (Sprint 17, 2026-09-12): `guardrails.py` (teto de cobertura, limite de variação sobre a compra histórica, restrição de caixa por margem sobre capital, tratamento separado de item novo — quatro regras nesta descrição original; `SupplierOrderPolicyParams`, config.py, comenta "seis regras de guarda" da Sprint 13 sem enumerá-las, então o número exato ficou ambíguo em algum ponto entre sprints) **nunca foi implementado** — não é que as regras existem e não dispararam no período, é que `Params.guardrails`/`GuardrailsParams` (config.py) não é lido por nenhuma função fora da própria declaração (confirmado por busca no código, pelo próprio `graphify-out/GRAPH_REPORT.md`, que já lista esse nó como isolado, e pela docstring de `motor.policy.base.Policy.order`, que já dizia "antes das regras de guarda (sprint futura: ainda não existem)" — a informação sempre esteve no código, só não tinha sido lida em conjunto). `supplier.py` (fardo, pedido mínimo, calendário de entrega) FOI implementado e testado (`motor.policy.supplier.apply_supplier_constraints`, Sprint 10) mas também nunca tinha sido chamado por nenhum código de produção até a Etapa 3.14 (Sprint 17), quando o gerador da lista de compra se tornou o primeiro caller real — o loop diário do simulador opera por par loja-item, sem consolidação por fornecedor, por desenho (seção 5 acima), então não é lá que essas restrições deveriam ter sido chamadas. Sprint 3 nunca deveria ter sido tratada como concluída nesta frente: sua própria condição de "pronto" (linha acima) não testa guardrails, e a frase "cada regra é uma função isolada e testável, e registra quando dispara" descrevia a intenção, não um fato verificado. Consequência para o produto, registrada aqui porque é real: sem as 4 regras de `guardrails.py`, nada impede o motor de sugerir uma quantidade absurda se a previsão quebrar — a lista de compra gerada pela Etapa 3.14 é utilizável como demonstração da política (braço 2 + restrições de fornecedor), não como produto pronto para um cliente real. Sprint 13 (as 4 regras, com as decisões de negócio que cada uma exige) é o próximo bloco de trabalho declarado, não implementado nesta emenda.
 
+Superada na Etapa 3.16: as quatro regras foram implementadas em policy/guardrails.py e são testadas em tests/test_guardrails.py
+
+
 Sprint 4 — Features e previsão quantílica
 
 features/ com lags, médias móveis, dia da semana, feriado, início de mês, dia de pagamento, preço relativo e flag de promoção. quantile_gbm.py com LightGBM em perda pinball, um modelo por quantil, treinado sobre o painel de itens (modelo global, não um por SKU).
@@ -239,3 +276,19 @@ Rules:
 - If graphify-out/wiki/index.md exists, use it for broad navigation instead of raw source browsing.
 - Read graphify-out/GRAPH_REPORT.md only for broad architecture review or when query/path/explain do not surface enough context.
 - After modifying code, run `graphify update .` to keep the graph current (AST-only, no API cost).
+
+Emenda (Sprint 25, 2026-11-20): nenhum módulo fora de
+`src/motor/experiments/` importa `motor.experiments`; a AST e a ausência de
+LightGBM ao importar produto são verificadas em `tests/test_architecture.py`.
+`purchase_list` em `config/params.yaml` declara alpha, overrides de lead time
+e revisão e período do orçamento. Override `null` preserva o prazo do
+próprio fornecedor no cadastro; 7/14 são o legado experimental, não os
+prazos já medidos de um cliente. O relatório mensal agora fica em
+`motor.experiments.monthly_report`, pois relata experimentos. Excel da lista
+fixa a criação em `as_of`; o mensal, no fim do período simulado, garantindo
+metadados e bytes determinísticos. O piso de cobertura é 85, um ponto abaixo
+da medição combinada da Sprint 25, sem outras mudanças de pytest/coverage.
+`tests/golden/purchase_list_synthetic.json` caracteriza os sete caminhos da
+lista em quatro cenários sintéticos; nunca regenerar `tests/golden/` sem
+decisão humana registrada. Decisões de negócio em
+`docs/decisoes_em_aberto.md`; coleta em `docs/coleta/`.

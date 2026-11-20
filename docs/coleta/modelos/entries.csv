@@ -1,0 +1,3 @@
+store_id,item_id,received_date,quantity,order_date,supplier_id
+FICT-LOJA,FICT-ARROZ,2026-11-18,24.0,2026-11-16,FICT-GROCERY
+FICT-LOJA,FICT-TOMATE,2026-11-18,8.0,,FICT-PRODUCE

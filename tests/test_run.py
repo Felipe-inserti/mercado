@@ -22,6 +22,7 @@ from motor.config import (
     SubsetSelectionParams,
     load_params,
 )
+from motor.experiments import run as run_module
 from motor.experiments.run import (
     ExistingResultError,
     RunManifest,
@@ -167,6 +168,29 @@ def _cenario_um_item() -> tuple[pl.LazyFrame, pl.DataFrame, pl.DataFrame, Params
         [_supplier_row(supplier_id="SUP1", lead_time_days=2, review_period_days=3)]
     )
     return sales, items, suppliers, _tiny_params()
+
+
+def test_quantile_gbm_rejects_missing_predictions(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """O runner rejeita previsões ausentes mesmo quando Python remove asserts."""
+    sales, items, suppliers, params = _cenario_um_item()
+    monkeypatch.setattr(run_module, "load_store_locale", lambda *_args: None)
+    monkeypatch.setattr(run_module, "load_holidays", lambda *_args: pl.DataFrame())
+    monkeypatch.setattr(
+        run_module, "_build_quantile_gbm_registry", lambda **_kwargs: (None, pl.DataFrame(), None)
+    )
+    with pytest.raises(ValueError) as error:
+        run_arm(
+            "quantile_gbm_basestock",
+            params=params,
+            sales=sales,
+            items=items,
+            suppliers=suppliers,
+            stock=_EMPTY_STOCK,
+            subset_cache_path=tmp_path / "subset.json",
+        )
+    assert str(error.value) == "As previsões do braço quantile_gbm devem estar disponíveis."
 
 
 # -- hash dos parâmetros de seleção -----------------------------------------

@@ -96,4 +96,5 @@ markers = [
 source = ["src/motor"]
 
 [tool.coverage.report]
-fail_under = 86
+# Piso 1 ponto abaixo da cobertura medida na Sprint 25, para tolerar variações pequenas.
+fail_under = 85

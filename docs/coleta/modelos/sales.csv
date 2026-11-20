@@ -1,0 +1,3 @@
+store_id,item_id,date,units_sold,units_returned,on_promo,price,is_operating_day,is_anomaly,anomaly_reason
+FICT-LOJA,FICT-ARROZ,2026-11-18,18.0,0.0,false,5.0,true,false,
+FICT-LOJA,FICT-TOMATE,2026-11-18,2.5,0.0,,3.0,true,false,

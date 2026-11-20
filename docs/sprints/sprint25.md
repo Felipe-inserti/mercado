@@ -2,7 +2,9 @@
 
 Execução parcial em **20/11/2026**. Rodada 1: **Fases 0 e 1**, commitadas pelo
 Rafael em `74383fe`. Rodada 2: **Fases 2 e 3**, commitadas em `fbcfce3`.
-Rodada 3: **Fases 4 a 7**, conforme pedido anexado pelo Rafael.
+Rodada 3: **Fases 4 a 7**, commitadas em `0be9b75`.
+Rodada 4: **Fases 8, 10, 11 e 13 concluídas localmente**; Fase 9 pendente
+por DNS/rede, sem alteração do lock. Fase 12 excluída. Relatório final abaixo.
 Especificação: `PROMPT_CODEX_sprint25.md`; `EXECUTAR_FASE_BACKTEST: não`.
 O agente não executa commits. O registro da rodada 1 abaixo é histórico;
 os resultados das rodadas seguintes são acrescentados ao final.
@@ -811,3 +813,710 @@ Mensagens de commit sugeridas, sem executá-las:
 **Ponto de parada da rodada 3: Fases 4, 6 e 7 concluídas; Fase 5 concluída
 no escopo autorizado, com o assert do runner preservado. Fase 8 não iniciada.
 Nenhum commit executado.**
+
+## Rodada 4 — linha de base e escopo final
+
+Rodadas 1–3 commitadas pelo Rafael; partida em `0be9b75`, branch
+`feat/correcoes-motor`, `git status --short` vazio. Seção 3 e histórico desta
+sprint relidos. Escopo autorizado: Fases 8, 9, 10, 11 e 13; Fase 12 excluída.
+Felipe confirmou a regressão da rodada 2, segundo o Rafael. A única edição
+agora autorizada no runner é substituir o assert restante por exceção testada.
+
+Linha de base medida **antes de editar**:
+
+```text
+uv run pytest -q
+TOTAL                                      4074    526    87%
+Required test coverage of 86.0% reached. Total coverage: 87.09%
+508 passed, 1 skipped, 3 deselected in 60.70s (0:01:00)
+grep -rn "type: ignore" src | wc -l
+      39
+```
+
+Lista: 359 instruções, 27 não executadas (92%); mensal: 334/6 (98%).
+Sem xfail. Contagem AST inclusiva (`end_lineno - lineno + 1`):
+`_build_supplier_list` 109, `generate_purchase_list` 98,
+`write_supplier_workbook` 88. Nenhuma outra função da lista ultrapassa 80.
+
+Mantidos `UV_NO_SYNC=1 UV_NO_CACHE=1 PYTHONDONTWRITEBYTECODE=1` nos checks.
+A sincronização da Fase 9 é exceção explícita autorizada nesta rodada à
+proibição anterior de tocar no ambiente. Nenhuma premissa será alterada.
+
+## Fase 8 — funções da lista menores, comportamento preservado
+
+Extrações privadas, tipadas e com docstrings em português; textos, aritmética,
+arredondamentos, ordem dos fornecedores e aplicação das guardas preservados.
+
+| Função original | Antes desta rodada | Depois (AST inclusiva) |
+|---|---:|---:|
+| `_build_supplier_list` | 109 | 74 |
+| `generate_purchase_list` | 98 | 75 |
+| `write_supplier_workbook` | 88 | 71 |
+
+Helpers: `_supplier_category` 14, `_supplier_purchase_rows` 47,
+`_preliminary_supplier_lists` 31, `_guardrail_firing_report` 18,
+`_write_workbook_notes` 35. Nenhuma função do arquivo acima de 80 linhas.
+Na Fase 0 eram três (109/98/83); o aumento do writer para 88 ocorreu nas
+rodadas anteriores, com a configuração explícita dos prazos.
+
+Após **cada** função original, comando exigido com os quatro módulos da
+lista/determinismo e `--no-cov`: **61 passed in 27.40s**, **61 passed in
+27.89s**, **61 passed in 27.61s**, respectivamente. Houve também um check
+intermediário de 61 testes (27.58s) antes de extrair a validação da categoria.
+Golden sem escrita/regeneração; `git diff --exit-code tests/golden/`: 0.
+
+Pendências autorizadas da rodada 3 atendidas: piso alterado de 86 para 85,
+somente com o comentário solicitado; runner com `if ... is None`, ValueError
+em português e teste que provoca a ausência das previsões. Teste focado:
+**1 passed in 0.78s**. Nenhuma outra edição no runner (diff conferido).
+
+Checks da Fase 8: Ruff `All checks passed!`; format `106 files already
+formatted`; mypy `Success: no issues found in 47 source files`. Suíte completa
+concluída: **509 passed, 1 skipped, 3 deselected in 61.30s**; total 87,25%,
+lista 93%, mensal 98%; piso 85 ativo. **Fase 8 concluída.**
+
+## Fase 9 — atualização e auditoria bloqueadas por rede
+
+Tentativa real de `uv lock --upgrade-package pillow --upgrade-package tornado
+--upgrade-package soupsieve` (uv 0.13.9): retorno **2**, depois das tentativas
+normais do uv:
+
+```text
+error: Request failed after 3 retries in 5.7s
+  cause: Failed to fetch: https://pypi.org/simple/pydantic/
+  cause: error sending request for url (https://pypi.org/simple/pydantic/)
+  cause: client error (Connect)
+  cause: dns error
+  cause: error resolving DNS
+  cause: failed to lookup address information: nodename nor servname provided, or not known
+```
+
+`uv sync` também foi tentado, conforme solicitado; retorno **2**:
+
+```text
+Resolved 129 packages in 3ms
+   Building motor @ file:///Users/rafaelcruxen/Documents/mercado
+error: Failed to build `motor @ file:///Users/rafaelcruxen/Documents/mercado`
+  cause: Failed to resolve requirements from `build-system.requires`
+  cause: No solution found when resolving: `hatchling`
+  cause: Request failed after 3 retries in 8.5s
+  cause: Failed to fetch: https://pypi.org/simple/hatchling/
+  cause: client error (Connect)
+  cause: dns error
+```
+
+`git diff --stat uv.lock`: **vazio**. `git diff --exit-code uv.lock`: **0**.
+Não houve resolução nova nem necessidade de restauração. Versões:
+
+| Pacote | HEAD | Após a tentativa |
+|---|---|---|
+| pillow | 12.3.0 | 12.3.0 |
+| tornado | 6.5.8 | 6.5.8 |
+| soupsieve | 2.9.2 | 2.9.2 |
+
+Demais versões de produção intactas: polars 1.44.2, lightgbm 4.7.0,
+numpy 2.5.3, pydantic 2.13.5, pyarrow 25.0.1, scipy 1.18.1,
+scikit-learn 1.9.0, xlsxwriter 3.2.9, pyyaml 6.0.3. Nenhuma dependência
+acrescentada; nenhum uso de pip, curl ou wget.
+
+Os dois `uv export` funcionaram (129 pacotes resolvidos; retorno 0).
+A primeira chamada de uvx tentou criar `~/.local/share/uv/tools` e recebeu
+`Operation not permitted`; nenhuma escrita autorizada ali. Repetição com
+UV_TOOL_DIR/UV_TOOL_BIN_DIR em diretório temporário permitido em /tmp,
+sem contornar rede. As duas chamadas de pip-audit retornaram **2**, por DNS
+em `https://pypi.org/simple/pip-audit/`. Não há contagem confiável de
+vulnerabilidades: **não auditado**, jamais "zero".
+
+Lint, formato e mypy: verdes (106 arquivos formatados; 47 fontes sem erros).
+Suíte: **509 passed, 1 skipped, 3 deselected in 60.79s**; cobertura total
+87,25%, lista 93%, mensal 98%; golden e determinismo passaram. Bandit
+retornou 2 por DNS; sem resultados de análise. /tmp/req.txt e o diretório
+temporário do uvx removidos em finally (ausência conferida).
+
+Saída real das auditorias com diretórios temporários permitidos:
+
+```text
+$ uvx pip-audit -r /tmp/req.txt
+WARN Retry attempt #0. Sleeping 1.226174607s before the next attempt
+WARN Retry attempt #1. Sleeping 3.587688763s before the next attempt
+WARN Retry attempt #2. Sleeping 3.184178253s before the next attempt
+error: Request failed after 3 retries in 8.0s
+  cause: Failed to fetch: https://pypi.org/simple/pip-audit/
+  cause: error sending request for url (https://pypi.org/simple/pip-audit/)
+  cause: client error (Connect)
+  cause: dns error
+  cause: error resolving DNS
+  cause: failed to lookup address information: nodename nor servname provided, or not known
+exit_code=2
+$ uv export --no-hashes --format requirements-txt
+Resolved 129 packages in 5ms
+exit_code=0
+$ uvx pip-audit -r /tmp/req.txt
+WARN Retry attempt #0. Sleeping 1.419855004s before the next attempt
+WARN Retry attempt #1. Sleeping 1.407273271s before the next attempt
+WARN Retry attempt #2. Sleeping 1.599668162s before the next attempt
+error: Request failed after 3 retries in 4.4s
+  cause: Failed to fetch: https://pypi.org/simple/pip-audit/
+  cause: error sending request for url (https://pypi.org/simple/pip-audit/)
+  cause: client error (Connect)
+  cause: dns error
+  cause: error resolving DNS
+  cause: failed to lookup address information: nodename nor servname provided, or not known
+exit_code=2
+$ uvx bandit -r src -ll
+WARN Retry attempt #0. Sleeping 1.814219854s before the next attempt
+WARN Retry attempt #1. Sleeping 3.906836902s before the next attempt
+WARN Retry attempt #2. Sleeping 4.396164909s before the next attempt
+error: Request failed after 3 retries in 10.1s
+  cause: Failed to fetch: https://pypi.org/simple/bandit/
+  cause: error sending request for url (https://pypi.org/simple/bandit/)
+  cause: client error (Connect)
+  cause: dns error
+  cause: error resolving DNS
+  cause: failed to lookup address information: nodename nor servname provided, or not known
+exit_code=2
+```
+
+**Fase 9 pendente por rede, sem atualização do lock.** As fases independentes
+prosseguem conforme a autorização expressa de registrar os comandos para o
+Rafael quando não houver rede. G10 não será declarado aprovado.
+
+## Fase 10 — CI e instruções do repositório
+
+Criados `.github/workflows/ci.yml` e `AGENTS.md`. Workflow em push e
+pull_request, ubuntu-latest, Python 3.12, sync --locked, Ruff, format, mypy
+strict e pytest -q. Addopts continua excluindo `regression`; o CI não exige
+Favorita. Tags completas verificadas nas releases oficiais:
+[checkout v7.0.1](https://github.com/actions/checkout/releases/tag/v7.0.1) e
+[setup-uv v10.4.0](https://github.com/astral-sh/setup-uv/releases/tag/v10.4.0).
+
+Validação YAML pelo comando solicitado: retorno **0**, stdout vazio.
+O workflow não foi executado no GitHub nesta sessão; só será disparado após
+publicação pelo Rafael. AGENTS.md lido após criação; aponta ao contrato e
+à regra Git, checks, camadas e decisão humana para regenerar golden.
+
+`.claude/scheduled_tasks.lock` acrescentado ao .gitignore. O arquivo ainda é
+versionado (`git ls-files` confirma); somente Rafael deve executar
+`git rm --cached .claude/scheduled_tasks.lock`. Nenhuma edição em .claude/.
+Os hooks de `.claude/settings.json` apontam a
+`/home/felipe/.local/bin/graphify`; cabe ao Felipe decidir movê-los para
+`.claude/settings.local.json`, que já está ignorado. Não foi alterado.
+
+Checks: Ruff limpo, **107 files already formatted**, mypy 47 fontes sem erros;
+suíte: **509 passed, 1 skipped, 3 deselected in 63.60s**; total 87,25%, lista
+93%, mensal 98%. **Fase 10 concluída localmente**, publicação do CI por Rafael.
+
+## Fase 11 — documentação e coleta
+
+Atualizados CLAUDE.md (Python 3.12, mypy strict, árvore real, contratos,
+nota de superação da emenda Sprint 17 e emenda Sprint 25 de 20/11/2026),
+README e somente “Pendências antes do piloto” da Sprint 24. A afirmação
+antiga sobre o alpha foi corrigida: a lista rodava via model_copy; agora
+usa configuração explícita. O arquivo piloto_backtest.py não existe.
+
+Criados `docs/decisoes_em_aberto.md`, `docs/coleta/dicionario_de_dados.md`,
+`docs/coleta/roteiro_exportacao.md` e cinco modelos CSV (sales/items/
+suppliers/stock/entries), cada qual com duas linhas **FICTÍCIAS**.
+A lista única cobre os quatro null e as quatro chaves de purchase_list,
+com responsáveis, evidência necessária e consequência do estado atual.
+Nenhuma decisão comercial foi tomada nem parâmetro preenchido.
+
+O dicionário distingue valor nulo de coluna ausente; documenta os quatro
+parquet obrigatórios no carregador atual, stock vazio tipado, entries
+opcional ainda sem carregamento automático e as premissas de fardo/mínimo
+por categoria ainda usadas pela lista. O roteiro exige 364 dias de treino
+mais 90 de aquecimento antes da avaliação, sem inventar duração do piloto.
+Não pede CPF, cartão nem identificação de compradores.
+
+Validação real dos CSVs com schemas derivados dos cinco modelos, casts de
+CSV para tipos canônicos e `validate_table`:
+
+```text
+sales: cabeçalho exato, 2 linhas, contrato válido
+items: cabeçalho exato, 2 linhas, contrato válido
+suppliers: cabeçalho exato, 2 linhas, contrato válido
+stock: cabeçalho exato, 2 linhas, contrato válido
+entries: cabeçalho exato, 2 linhas, contrato válido
+Integridade referencial e cadência: válidas
+Todas as emendas antigas preservadas literalmente
+Backtest 24.7 presente: False
+Links locais de README, decisões e coleta: válidos
+Sprint 24: só Pendências alterada
+Seção Git do contrato preservada
+```
+
+Checks: Ruff `All checks passed!`, format `110 files already formatted`,
+mypy `Success: no issues found in 47 source files`; diff --check vazio.
+Suíte: **509 passed, 1 skipped, 3 deselected in 62.98s**; cobertura total
+87,25%, lista 93%, mensal 98%. **Fase 11 concluída.**
+
+## Fase 13 — verificação final da rodada 4
+
+Tudo executado novamente sobre o estado final, sem sincronização implícita
+do ambiente. Não houve commit, alteração de índice ou publicação. O skip
+preexistente exige suppliers.parquet; três testes regression são excluídos
+pelo addopts. **Zero xfail, falhas ou erros na suíte normal.**
+
+Os blocos seguintes contêm a saída real dos comandos; as linhas de
+progresso dos dois comandos de pytest foram omitidas; espaços finais em
+linhas vazias do diff foram normalizados para manter o Markdown limpo.
+As auditorias e seus erros reais estão na Fase 9 acima: não foram
+repetidas para contornar a falha de rede já confirmada.
+
+```text
+$ uv run pytest -q -p no:cacheprovider
+================================ tests coverage ================================
+______________ coverage: platform darwin, python 3.12.16-final-0 _______________
+
+Name                                      Stmts   Miss  Cover   Missing
+-----------------------------------------------------------------------
+src/motor/__init__.py                         0      0   100%
+src/motor/assumptions.py                     37      0   100%
+src/motor/config.py                         218      2    99%   388-392
+src/motor/experiments/__init__.py             0      0   100%
+src/motor/experiments/iso_service.py        112     57    49%   171-172, 188-189, 266, 278-303, 309-346, 358-410, 417
+src/motor/experiments/monthly_report.py     334      6    98%   834-840, 844
+src/motor/experiments/run.py                285     26    91%   168-220, 406, 764-765, 767, 1006-1043, 1051
+src/motor/experiments/sensitivity.py        342    265    23%   174, 195, 231-291, 333, 402-411, 448-461, 490-589, 607-666, 672-677, 691-694, 713-722, 738-746, 764-810, 829-916, 927-1022, 1026-1139, 1147
+src/motor/experiments/shared.py               3      0   100%
+src/motor/experiments/stale_baseline.py     145     49    66%   167-177, 380-475, 479-501, 505
+src/motor/features/__init__.py                1      0   100%
+src/motor/features/build.py                  66      4    94%   190-191, 194-195
+src/motor/features/calendar.py               53      0   100%
+src/motor/features/censoring.py              44      3    93%   114, 138-139
+src/motor/forecast/__init__.py                0      0   100%
+src/motor/forecast/base.py                   15      0   100%
+src/motor/forecast/naive.py                  63      1    98%   141
+src/motor/forecast/naive_seasonal.py         27      0   100%
+src/motor/forecast/quantile_gbm.py          200     18    91%   150, 188, 211, 273, 327-328, 337-341, 559-563, 626-627, 632-637, 639-644, 659-663
+src/motor/forecast/statistical.py            90      1    99%   77
+src/motor/inventory.py                       58      0   100%
+src/motor/io/__init__.py                      0      0   100%
+src/motor/io/canonical.py                    15      0   100%
+src/motor/io/contracts.py                   326     11    97%   377-378, 425, 456-458, 465, 469, 493-494, 502
+src/motor/io/loaders.py                     158      6    96%   166-167, 169, 638, 666, 773
+src/motor/io/quality_report.py              172      2    99%   431-432
+src/motor/io/raw.py                          90     33    63%   134, 189-223, 250-266, 270-280, 284
+src/motor/io/supplier_overrides.py           13      0   100%
+src/motor/metrics/__init__.py                 0      0   100%
+src/motor/metrics/financial.py               71      0   100%
+src/motor/metrics/forecast_quality.py        52      0   100%
+src/motor/policy/__init__.py                  0      0   100%
+src/motor/policy/base.py                     13      0   100%
+src/motor/policy/basestock.py                12      0   100%
+src/motor/policy/erp_baseline.py             42      0   100%
+src/motor/policy/erp_calibration.py          93      1    99%   134
+src/motor/policy/guardrails.py              164      1    99%   523
+src/motor/policy/supplier.py                 97      2    98%   166-167
+src/motor/policy/target_level.py             52      0   100%
+src/motor/profiling.py                       53      6    89%   47-62, 184-197
+src/motor/reporting/__init__.py               0      0   100%
+src/motor/reporting/purchase_list.py        370     27    93%   1167-1221, 1225
+src/motor/selection.py                       71      0   100%
+src/motor/selection_cache.py                 24      0   100%
+src/motor/simulator/__init__.py               0      0   100%
+src/motor/simulator/engine.py                84      0   100%
+src/motor/simulator/pair.py                  22      0   100%
+-----------------------------------------------------------------------
+TOTAL                                      4087    521    87%
+Required test coverage of 85.0% reached. Total coverage: 87.25%
+509 passed, 1 skipped, 3 deselected in 61.77s (0:01:01)
+```
+
+Retorno: **0**.
+
+```text
+$ uv run pytest -q --no-cov --durations=10
+============================= slowest 10 durations =============================
+9.06s setup    tests/test_purchase_list_characterization.py::test_generate_purchase_list_matches_complete_golden[default]
+4.66s setup    tests/test_reporting_determinism.py::test_purchase_list_decisions_are_identical_across_runs
+4.14s call     tests/test_purchase_list_configuration.py::test_excel_notes_use_configured_overrides_and_alpha
+3.64s call     tests/test_purchase_list_configuration.py::test_null_overrides_use_each_supplier_risk_window_and_excel_note
+2.30s call     tests/test_purchase_list_configuration.py::test_budget_period_is_independent_of_supplier_review
+2.20s call     tests/test_quantile_gbm.py::test_embaralhamento_desempenho_cai_ao_nivel_trivial
+1.77s call     tests/test_quantile_gbm.py::test_cobertura_empirica_por_quantil_no_periodo_simulado
+1.17s call     tests/test_reporting_determinism.py::test_monthly_workbook_bytes_are_identical_across_clock_seconds
+1.15s call     tests/test_reporting_determinism.py::test_purchase_workbook_bytes_are_identical_across_clock_seconds
+0.61s call     tests/test_monthly_report_workbook.py::test_monthly_cli_uses_only_synthetic_default_relative_paths
+509 passed, 1 skipped, 3 deselected in 34.82s
+```
+
+Retorno: **0**.
+
+```text
+$ uv run ruff check .
+All checks passed!
+```
+
+Retorno: **0**.
+
+```text
+$ uv run ruff format --check .
+110 files already formatted
+```
+
+Retorno: **0**.
+
+```text
+$ uv run mypy src/
+Success: no issues found in 47 source files
+```
+
+Retorno: **0**.
+
+```text
+$ grep -rn "type: ignore" src | wc -l
+      39
+```
+
+Retorno: **0**.
+
+```text
+$ grep -rn '^\s*assert ' src
+```
+
+Retorno: **1**, saída vazia.
+
+```text
+$ grep -rn 'motor.experiments' src/motor --include='*.py' | grep -v '^src/motor/experiments/'
+src/motor/forecast/quantile_gbm.py:13:(`train_quantile_models`, chamado por `motor.experiments.run.run_arm` antes
+src/motor/metrics/financial.py:6:`motor.experiments.shared` recebe premissas de simulação em vez de `Params`
+src/motor/metrics/financial.py:280:    `expired`, `on_hand_end` (saída de `motor.experiments.run`, ou os
+src/motor/config.py:193:    loaders`, `motor.experiments.run`/`sensitivity`/`iso_service`, nem por
+src/motor/policy/basestock.py:34:    para os dois (`motor.experiments.shared.build_simulator_for_pair` e
+src/motor/policy/basestock.py:35:    `motor.experiments.run._build_policy`/`_build_forecaster`, que derivam
+src/motor/assumptions.py:16:`motor.experiments.run` embute em TODO manifesto (`RunManifest.assumptions`,
+```
+
+Retorno: **0**.
+
+```text
+$ git diff --exit-code tests/golden/
+```
+
+Retorno: **0**, saída vazia.
+
+```text
+$ git diff --stat -- src/motor/inventory.py src/motor/policy/supplier.py src/motor/policy/guardrails.py src/motor/policy/basestock.py src/motor/metrics/financial.py src/motor/io/loaders.py src/motor/io/raw.py src/motor/simulator/engine.py
+```
+
+Retorno: **0**, saída vazia.
+
+```text
+$ git diff HEAD~3 -- config/params.yaml
+diff --git a/config/params.yaml b/config/params.yaml
+index 538dfba..3112015 100644
+--- a/config/params.yaml
++++ b/config/params.yaml
+@@ -285,6 +285,12 @@ purchase_list_supplier_assumptions:
+     BOOKS: 2000.0
+     "HOME APPLIANCES": 2000.0
+
++purchase_list:
++  alpha: 0.66 # valor atual: ARM2_CHOSEN_ALPHA (iso-serviço, Etapa 3.12, célula lt=7/rp=14); revisar com o dado real
++  lead_time_days_override: 7 # valor atual: célula da Etapa 3.12. null = usar o lead_time_days do cadastro do fornecedor
++  review_period_days_override: 14 # valor atual: célula da Etapa 3.12. null = usar o review_period_days do cadastro do fornecedor
++  budget_period_days: 14 # valor atual: CELL_REVIEW_PERIOD_DAYS; período do orçamento por ciclo (weekly_budget_rs x dias/7)
++
+ economics:
+   capital_cost_annual: 0.15 # arbitrado: custo de capital anualizado plausível para varejo pequeno/médio no Brasil
+   # Sprint 8: preço único por unidade vendida, aplicado a TODO item -- o Favorita não
+```
+
+Retorno: **0**.
+
+```text
+$ git diff --exit-code HEAD -- config/params.yaml
+```
+
+Retorno: **0**, saída vazia.
+
+```text
+$ git diff HEAD~3 --exit-code -- src/motor/forecast/base.py src/motor/policy/base.py
+```
+
+Retorno: **0**, saída vazia.
+
+```text
+$ git diff HEAD~3 --stat -- src/motor/inventory.py src/motor/policy/supplier.py src/motor/policy/guardrails.py src/motor/policy/basestock.py src/motor/metrics/financial.py src/motor/io/loaders.py src/motor/io/raw.py src/motor/simulator/engine.py
+```
+
+Retorno: **0**, saída vazia.
+
+```text
+$ git diff --exit-code HEAD~3 -- .claude/ data/ results/
+```
+
+Retorno: **0**, saída vazia.
+
+O retorno 1 do grep de asserts significa **nenhuma ocorrência**, não falha de validação. As sete referências acima são docstrings. HEAD~3 inclui as rodadas anteriores: seu diff mostra apenas a adição autorizada do bloco purchase_list na rodada 2. O diff contra HEAD, desta rodada, é vazio.
+
+```text
+$ uv run pytest -q --no-cov tests/test_architecture.py tests/test_financial.py tests/test_purchase_list.py::test_item_decision_accepts_unmodified_repository_params
+....................                                                     [100%]
+20 passed in 0.80s
+```
+
+Retorno: **0**.
+
+```text
+$ uv run python (leitura da base .coverage pela API Coverage.analysis2)
+src/motor/reporting/purchase_list.py 343/370 = 92.702703%
+src/motor/experiments/monthly_report.py 328/334 = 98.203593%
+TOTAL 3566/4087 = 87.252263%
+```
+
+Retorno: **0**.
+
+### G7 — revalidação dos mutantes nesta rodada
+
+Além das mutações temporárias de arquivo já documentadas na Fase 4, os
+três mutantes foram **reexecutados nesta rodada somente em memória**.
+Comando `uv run python` lê financial.py, substitui uma única expressão,
+executa `exec(compile(...), module.__dict__)` em um subprocesso novo para
+cada mutante e chama `pytest.main` com `--no-cov -p no:cacheprovider` e o
+teste `test_financial_losses_and_margin_match_exact_manual_totals_excluding_warmup`.
+O controlador exige retorno 1 E “1 failed”, para não confundir erro de
+importação/sintaxe com mutante morto. Nenhuma escrita no módulo congelado.
+
+| Mutante | Falha real no item A | Saída do teste isolado |
+|---|---|---|
+| Ruptura usa preço | 70,0 em vez de 21,0 | `1 failed in 0.12s`, exit 1 |
+| Perda usa preço | 30,0 em vez de 21,0 | `1 failed in 0.06s`, exit 1 |
+| Margem usa demanda | 54,0 em vez de 33,0 | `1 failed in 0.06s`, exit 1 |
+
+O comando do controlador terminou com **3/3 mutantes mortos em memória;
+nenhum arquivo-fonte alterado**. `git diff --exit-code
+src/motor/metrics/financial.py`: vazio, retorno 0. Sem mutação, os 14 testes
+financeiros passaram no grupo focado de 20 testes e na suíte completa.
+
+### Portões G1–G12 — somente evidências desta rodada
+
+| Portão | Comando/verificação executado | Resultado real | Estado |
+|---|---|---|---|
+| G1 Testes | `uv run pytest -q -p no:cacheprovider` | 509 passed, 1 skipped, 3 deselected, 0 xfail; 61,77 s | ✅ |
+| G2 Lint/formato | `uv run ruff check .`; `uv run ruff format --check .` | All checks passed!; 110 files already formatted | ✅ |
+| G3 Tipos | `uv run mypy src/`; grep type: ignore | 47 fontes sem erros; 39 ignores (piso de partida 39) | ✅ |
+| G4 Camadas | pytest focado com `tests/test_architecture.py`, financeiro e positivo | 20 passed in 0.80s, incluindo os 5 casos de arquitetura; zero imports proibidos na AST | ✅ |
+| G5 Params reais | Mesmo grupo, `test_item_decision_accepts_unmodified_repository_params` | Passou com YAML sem alterações e grade global intacta | ✅ |
+| G6 Golden | Suítes completa e Fase 8; `git diff --exit-code tests/golden/` | Quatro cenários passam; diff vazio, retorno 0; hash preservado | ✅ |
+| G7 Financeiro | Controlador Python com três mutantes em memória; pytest financeiro; diff financeiro | 3/3 mortos nesta rodada; 14 testes verdes sem mutação; diff vazio | ✅ |
+| G8 Cobertura | Suíte final com `--cov=motor --cov-report=term-missing` do addopts; leitura pela API coverage | Total 87,2523%; lista 92,7027%; mensal 98,2036%; fail_under 85 ativo | ✅ |
+| G9 Determinismo | Comando dos quatro módulos exigidos na Fase 8, incluindo `tests/test_reporting_determinism.py`; suíte final | 61 passed in 27.61s no último ciclo; inclui os 3 testes de determinismo, abaixo de 30s até somados aos demais | ✅ |
+| G10 Segurança | uv lock/sync; dois uv export + uvx pip-audit; uvx bandit | Exports retornam 0; upgrade/sync/auditores retornam 2 por DNS. Sem contagem de vulnerabilidades ou achados | ❌ |
+| G11 Documentação | Releitura D11; validação dos CSVs, emendas, links e diff da Sprint 24 | Cinco contradições esclarecidas, 5 modelos válidos, decisões/coleta prontas; emendas preservadas | ✅ |
+| G12 Escopo | git status/stat; diffs de congelados, contratos, params, .claude/data/results; validação dos valores YAML | 8 congelados e 2 protocolos intactos inclusive contra HEAD~3; zero alteração de params nesta rodada; somente +6 linhas históricas da rodada 2 | ✅ |
+
+G10 **não aprovado**: Fase 9 permanece pendente para o Rafael com rede.
+CI validado localmente, ainda sem execução remota. Regressão final do
+Favorita cabe ao Felipe; a confirmação da rodada 2 veio pelo Rafael,
+não representa execução local nem validação deste estado final.
+
+### Antes/depois da sprint inteira — Fase 0 contra estado final
+
+| Medida | Fase 0 | Final |
+|---|---:|---:|
+| Testes aprovados | 451 | 509 (+58) |
+| Skip / deselected / xfail | 1 / 3 / 1 | 1 / 3 / 0 |
+| Cobertura total de linhas | 78,7781% (3159/4010) | 87,2523% (3566/4087) |
+| Lista de compra, linhas | 63,0499% (215/341) | 92,7027% (343/370) |
+| Relatório mensal, linhas | 31,8182% (105/330) | 98,2036% (328/334) |
+| type: ignore em src/ | 39 | 39 |
+| Imports AST proibidos | 6 | 0 |
+| Assert em src/ | 4 | 0 (grep e AST) |
+| Funções da lista >80 linhas | 3 (109/98/83) | 0; máximo 75 |
+| Tempo pytest -q com cobertura | 10,15 s | 61,77 s (sem cacheprovider) |
+| Tempo da suíte sem cobertura | Não medido na Fase 0 | 34,82 s |
+| Vulnerabilidades | Pillow/Tornado/SoupSieve sinalizados na avaliação externa, sem contagem auditada | Não auditadas por rede; mesmas versões, correção pendente |
+
+Percentuais acima são de **linhas**, comparáveis aos da Fase 0. A medição
+com branch da Fase 0 foi 78% e a da rodada 3 foi 86,0952%; não misturar
+essas medidas com o 87,2523% de linhas da rodada final. O piso 85 mantém a
+margem pedida em relação à medição combinada anterior.
+O tempo aumentou com as simulações reais dos quatro cenários, variantes de
+configuração e determinismo. As duas suítes finais estão abaixo de 90 s.
+
+O golden continua cobrindo **7/7**: pedido emitido, fornecedor fora do
+calendário (pela ausência), exceção, item novo, variação, teto de cobertura e
+restrição de caixa. Nenhum caminho ficou de fora; quatro cenários intactos.
+Hash SHA-256: `108bb537631c9bcfed216c41b26e723ea9d0f187a98778c17ea2c1445f42c125`.
+
+### Arquivos desta rodada, por fase
+
+- Pendências da rodada 3: `src/motor/experiments/run.py` (somente a guarda),
+  `tests/test_run.py` (novo teste, funções antigas preservadas por comparação
+  AST), `pyproject.toml` (somente fail_under 86→85 e comentário).
+- Fase 8: `src/motor/reporting/purchase_list.py`, helpers privados; import
+  novo `SupplierOrderResult` de `motor.policy.supplier`. No teste do runner,
+  acrescentado `from motor.experiments import run as run_module` para
+  simular previsões ausentes. Nenhum import de produto para experimento.
+- Fase 9: **nenhum arquivo alterado**; uv.lock permanece byte a byte no HEAD.
+- Fase 10: `.gitignore`; novos `.github/workflows/ci.yml` e `AGENTS.md`.
+- Fase 11: `CLAUDE.md`, `README.md`, `docs/sprints/sprint24.md`;
+  novos `docs/decisoes_em_aberto.md`, `docs/coleta/dicionario_de_dados.md`,
+  `docs/coleta/roteiro_exportacao.md`, `docs/coleta/modelos/sales.csv`,
+  `items.csv`, `suppliers.csv`, `stock.csv`, `entries.csv`.
+- Fases 8–13: `docs/sprints/sprint25.md` atualizado em cada fase.
+- **Nenhum arquivo movido nesta rodada**, nenhum notebook alterado.
+  Total: 9 arquivos rastreados modificados e 10 novos ainda não rastreados;
+  git diff --stat não inclui os novos, que estão listados no git status.
+
+### Decisões pendentes e responsáveis
+
+A lista única completa está em `docs/decisoes_em_aberto.md`:
+
+| Decisão | Responsável | O que falta |
+|---|---|---|
+| Média mínima e dias com venda para censura (dois null) | Felipe + dado real, com validação da dona | Vendas/recebimentos e casos reais de ruptura versus baixa demanda |
+| Janela de avaliação (null) | Dona + Felipe | Acordo de acompanhamento e histórico disponível; 8–12 semanas ainda é proposta |
+| Meia-vida GBM (null neutro) | Felipe | Comparação temporal dedicada sem vazamento |
+| Alpha 0,66 da lista | Felipe + dona | Serviço, margem, falta/sobra e capital no dado real |
+| Overrides 7/14 → null | Dona + Felipe + cadastro real | Prazos individuais e rotina de compra verificados |
+| Orçamento por ciclo de 14 dias | Dona, com Felipe | Caixa e calendário de pagamentos/compras |
+| Adaptador ERP, fardo/mínimos reais e 24.7 ausente | Felipe | Amostra do ERP, mapeamento e escopo confirmado; Fase 12 segue excluída |
+| Recomparação de braços/iso-serviço com baseline recalibrado | Felipe | Experimentos e relatórios atualizados antes de divulgação, pendência preservada da Sprint 24 |
+| Hook pessoal e regressão final Favorita | Felipe | Decidir configuração local; rodar com data e baseline disponíveis |
+| Atualização e auditorias de segurança | Rafael | Rede para PyPI e serviços de vulnerabilidades, seguida de checks |
+
+### Comandos para o Rafael e para o Felipe
+
+Rafael (execução manual, nenhum comando Git mutável foi executado pelo agente):
+
+```bash
+git rm --cached .claude/scheduled_tasks.lock
+uv lock --upgrade-package pillow --upgrade-package tornado --upgrade-package soupsieve
+git diff --stat uv.lock
+git diff uv.lock
+uv sync
+uv run pytest -q -p no:cacheprovider
+uv export --no-dev --no-hashes --format requirements-txt > /tmp/req.txt && uvx pip-audit -r /tmp/req.txt
+uv export --no-hashes --format requirements-txt > /tmp/req.txt && uvx pip-audit -r /tmp/req.txt
+uvx bandit -r src -ll
+rm /tmp/req.txt
+```
+
+Conferir as versões antes de aceitar o upgrade. Se outro pacote de produção
+mudar (inclusive scipy, além dos pins diretos), restaurar **somente uv.lock**
+com `git show HEAD:uv.lock > uv.lock`, executar `uv sync` e registrar o motivo.
+A auditoria e os testes não podem ser declarados aprovados por antecipação.
+
+Felipe, sobre o estado final e na máquina que tem data/ e a referência:
+
+```bash
+uv run pytest -m regression --no-cov tests/test_regression_favorita.py
+```
+
+Decidir se os hooks pessoais de `.claude/settings.json` devem ir para
+`.claude/settings.local.json` (já ignorado). Sem comando automático para
+isso; nada em .claude/ foi editado. Nenhum backtest novo nesta rodada.
+
+### Mensagens de commit sugeridas — não executadas
+
+- Pendências da rodada 3: `fix: validar previsões do runner e ajustar piso de cobertura`.
+- Fase 8: `refactor: reduzir funções da lista de compra preservando o golden`.
+- Fase 9, **somente após upgrade e auditoria reais**: `chore: atualizar dependências vulneráveis` (não há diff dessa fase agora).
+- Fase 10: `ci: verificar qualidade e documentar contrato para agentes`.
+- Fase 11: `docs: alinhar contratos e preparar coleta do mercado piloto`.
+- Fase 13: `docs: registrar portões finais e pendências da Sprint 25`.
+
+### Autorrevisão final R1–R14 — toda a sprint
+
+| Regra | Evidência e conclusão |
+|---|---|
+| R1 Git | Apenas comandos de leitura; status mostra zero alterações no índice. Commits das rodadas anteriores feitos pelo Rafael; nenhum pelo agente |
+| R2 Branch | Conferida antes do trabalho: feat/correcoes-motor, nunca main |
+| R3 Congelados | Diffs vazios dos 8 arquivos nesta rodada e contra HEAD~3. Só mutações temporárias autorizadas na Fase 4; restauradas e hash conferido. Revalidação final exclusivamente em memória |
+| R4 Contratos | forecast/base.py e policy/base.py sem diff inclusive contra HEAD~3 |
+| R5 Premissas | YAML comparado estruturalmente com HEAD~3: todos os valores antigos iguais. Só +6 linhas do bloco purchase_list da rodada 2; diff contra HEAD vazio; quatro null intactos |
+| R6 Números | Alpha, prazos e período do orçamento vêm da configuração. Nenhum novo valor de negócio fixado no produto; CSVs/testes identificados como fictícios |
+| R7 Dependências | Nenhuma adição ao pyproject; só piso autorizado e comentário. uv.lock intacto; upgrade limitado tentado, bloqueado por DNS. Sem pip/curl/wget |
+| R8 Escopo | Diffs .claude/data/results vazios em toda a sprint. Fase 9 autorizou uv sync (exceção ao bloqueio anterior de .venv). Temporários em /tmp removidos. Tentativa inicial de uvx escrever no diretório pessoal foi bloqueada, sem contornar a restrição; execução seguinte usou diretório temporário permitido |
+| R9 Testes | Nenhum teste antigo afrouxado/apagado; imports movidos na Fase 3. Única remoção de xfail substituída por positivo, conforme autorização. Funções antigas de test_run.py idênticas por AST |
+| R10 Maquiagem | 39 ignores antes/depois; nenhum noqa, pragma, skip ou xfail novo; nenhum omit/afrouxamento do pytest/coverage. Piso final 85 expressamente pedido; grep xfail em src/tests/pyproject vazio |
+| R11 Dados | Fixtures e 10 linhas dos cinco CSVs sintéticas; nenhum dado de cliente ou Favorita adicionado |
+| R12 Negócio | Nenhum null preenchido, alpha/cadência/orçamento recalibrado; decisões e responsáveis registrados |
+| R13 Estilo | Helpers privados, tipagem e docstrings portuguesas; polars; Ruff e mypy verdes; ordem/cálculos/textos e determinismo preservados pelo golden e XLSX |
+| R14 Registro | Este arquivo atualizado por fase; escopo, comandos, resultados e limitações de todas as rodadas preservados |
+
+Desvios/ressalvas, inclusive pequenos, sem esconder o histórico:
+
+1. Na rodada 3, o assert do runner foi preservado por decisão expressa do
+   Rafael (“Preservar run.py nesta rodada”), deixando o grep global vermelho.
+   A autorização nova permitiu somente a guarda; pendência agora resolvida.
+2. Na Fase 3, `iso_service.cell_suppliers` manteve um pequeno adaptador para
+   os defaults experimentais 7/14, em vez de reexportação pura, preservando
+   chamadores e resultados legados. Os demais nomes continuam reexportados.
+3. Referências antigas em docstrings de basestock/financial não foram
+   atualizadas porque esses módulos são congelados. O grep final retorna
+   sete linhas de docstrings, nenhuma importação; a AST valida zero violações.
+4. Na rodada 2 foram apagados dois bytecodes ignorados e obsoletos sob
+   reporting/__pycache__, para não contaminar o grep de model_copy. Nenhum
+   arquivo de fonte ou diretório proibido foi apagado nessa limpeza.
+5. R8 teve a exceção explícita de sincronização pedida na Fase 9. A tentativa
+   inicial de uvx usar ~/.local/share/uv/tools foi negada pelo filesystem;
+   não foi uma aprovação concedida nem uma escrita bem-sucedida. Temporários
+   permitidos foram usados depois, sem bypass de rede. `ps` de diagnóstico
+   também foi negado pelo sandbox; sem efeito sobre o trabalho.
+6. Fase 9 e G10 não concluídos por DNS. Não houve correção nem auditoria de
+   vulnerabilidades, nem mudança no lock. Esse limite é a alternativa
+   expressamente autorizada no pedido; não foi mascarado como verde.
+7. Piso inicialmente 86 na rodada 3 e agora 85, com comentário, por pedido
+   explícito. Nenhuma outra configuração ou dependência alterada. As
+   supressões/skip preexistentes e as três desmarcações foram mantidas.
+8. Fase 12 continua fora do escopo; não é implementação concluída. Não houve
+   regeneração do golden após a Fase 1, mudança permanente dos congelados,
+   decisão comercial oculta ou comando Git mutável em nenhuma rodada.
+
+<!-- SPRINT25_STATUS_START -->
+
+```text
+$ git status --untracked-files=all
+On branch feat/correcoes-motor
+Your branch is up to date with 'origin/feat/correcoes-motor'.
+
+Changes not staged for commit:
+  (use "git add <file>..." to update what will be committed)
+  (use "git restore <file>..." to discard changes in working directory)
+	modified:   .gitignore
+	modified:   CLAUDE.md
+	modified:   README.md
+	modified:   docs/sprints/sprint24.md
+	modified:   docs/sprints/sprint25.md
+	modified:   pyproject.toml
+	modified:   src/motor/experiments/run.py
+	modified:   src/motor/reporting/purchase_list.py
+	modified:   tests/test_run.py
+
+Untracked files:
+  (use "git add <file>..." to include in what will be committed)
+	.github/workflows/ci.yml
+	AGENTS.md
+	docs/coleta/dicionario_de_dados.md
+	docs/coleta/modelos/entries.csv
+	docs/coleta/modelos/items.csv
+	docs/coleta/modelos/sales.csv
+	docs/coleta/modelos/stock.csv
+	docs/coleta/modelos/suppliers.csv
+	docs/coleta/roteiro_exportacao.md
+	docs/decisoes_em_aberto.md
+
+no changes added to commit (use "git add" and/or "git commit -a")
+
+$ git diff --stat
+ .gitignore                           |   1 +
+ CLAUDE.md                            |  95 +++--
+ README.md                            |  65 +++-
+ docs/sprints/sprint24.md             |   3 +-
+ docs/sprints/sprint25.md             | 711 ++++++++++++++++++++++++++++++++++-
+ pyproject.toml                       |   3 +-
+ src/motor/experiments/run.py         |   4 +-
+ src/motor/reporting/purchase_list.py | 143 +++++--
+ tests/test_run.py                    |  24 ++
+ 9 files changed, 991 insertions(+), 58 deletions(-)
+```
+
+<!-- SPRINT25_STATUS_END -->
+
+**Ponto final da rodada 4:** Fases 8, 10, 11 e 13 concluídas localmente;
+Fase 9 bloqueada por rede, G10 pendente; Fase 12 excluída. Regressão final
+Favorita e publicação/commits ficam com Rafael/Felipe. Nenhum commit feito.

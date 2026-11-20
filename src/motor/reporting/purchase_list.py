@@ -117,6 +117,7 @@ from motor.policy.supplier import (
     AdjustmentReason,
     ItemPurchaseInfo,
     OrderOutcome,
+    SupplierOrderResult,
     apply_supplier_constraints,
 )
 from motor.selection_cache import load_or_select_subset
@@ -637,16 +638,7 @@ def _build_supplier_list(
     A restrição de caixa (regra 3) NÃO é aplicada aqui -- roda depois,
     sobre o portfólio inteiro (`_finalize_with_cash_constraint`).
     """
-    categories = {decisions.category_of[item_id] for item_id in supplier_item_ids}
-    if len(categories) != 1:
-        msg = (
-            f"fornecedor {supplier_id!r} tem itens de categorias diferentes "
-            f"({sorted(categories)}) -- _min_order_value_for assume uma categoria só "
-            "por fornecedor, verdade no dataset atual (supplier_id=SUP-<CATEGORY>); "
-            "isso quebrou."
-        )
-        raise ValueError(msg)
-    category = next(iter(categories))
+    category = _supplier_category(supplier_id, supplier_item_ids, decisions)
 
     supplier = Supplier(
         supplier_id=supplier_id,
@@ -680,6 +672,52 @@ def _build_supplier_list(
         ),
     )
 
+    main_rows, exception_rows = _supplier_purchase_rows(
+        supplier_item_ids,
+        order_result=order_result,
+        decisions=decisions,
+        supplier_purchase_info=supplier_purchase_info,
+        supplier_position=supplier_position,
+        supplier_daily_demand=supplier_daily_demand,
+        guardrail_flags=guardrail_flags,
+    )
+    return SupplierPurchaseList(
+        supplier_id=supplier_id,
+        category=category,
+        outcome=order_result.outcome,
+        min_order_value=supplier.min_order_value,
+        main=tuple(main_rows),
+        exceptions=tuple(exception_rows),
+    )
+
+
+def _supplier_category(
+    supplier_id: str, supplier_item_ids: list[str], decisions: _ItemDecisions
+) -> str:
+    """Valida a categoria única exigida pela premissa de mínimo do fornecedor."""
+    categories = {decisions.category_of[item_id] for item_id in supplier_item_ids}
+    if len(categories) != 1:
+        msg = (
+            f"fornecedor {supplier_id!r} tem itens de categorias diferentes "
+            f"({sorted(categories)}) -- _min_order_value_for assume uma categoria só "
+            "por fornecedor, verdade no dataset atual (supplier_id=SUP-<CATEGORY>); "
+            "isso quebrou."
+        )
+        raise ValueError(msg)
+    return next(iter(categories))
+
+
+def _supplier_purchase_rows(
+    supplier_item_ids: list[str],
+    *,
+    order_result: SupplierOrderResult,
+    decisions: _ItemDecisions,
+    supplier_purchase_info: dict[str, ItemPurchaseInfo],
+    supplier_position: dict[str, float],
+    supplier_daily_demand: dict[str, float],
+    guardrail_flags: dict[str, list[GuardrailFlag]],
+) -> tuple[list[PurchaseListRow], list[PurchaseListRow]]:
+    """Monta linhas principais e exceções na ordem dos códigos dos itens."""
     adjustments_by_item: dict[str, list[AdjustmentReason]] = {}
     for adj in order_result.adjustments:
         adjustments_by_item.setdefault(adj.item_id, []).append(adj.reason)
@@ -715,14 +753,7 @@ def _build_supplier_list(
         )
         (exception_rows if is_exception else main_rows).append(row)
 
-    return SupplierPurchaseList(
-        supplier_id=supplier_id,
-        category=category,
-        outcome=order_result.outcome,
-        min_order_value=supplier.min_order_value,
-        main=tuple(main_rows),
-        exceptions=tuple(exception_rows),
-    )
+    return main_rows, exception_rows
 
 
 def _finalize_with_cash_constraint(
@@ -853,6 +884,37 @@ def generate_purchase_list(
         decisions, is_new=is_new, cell_params=cell_params
     )
 
+    preliminary = _preliminary_supplier_lists(
+        suppliers,
+        decisions=decisions,
+        final_desired=final_desired,
+        guardrail_flags=guardrail_flags,
+        cell_params=cell_params,
+        as_of=as_of,
+    )
+
+    cycle_budget_rs = _cycle_budget_rs(
+        cell_params.guardrails.weekly_budget_rs, cell_params.purchase_list.budget_period_days
+    )
+    results, cash_flags, category_floor_alert = _finalize_with_cash_constraint(
+        preliminary,
+        budget_rs=cycle_budget_rs,
+        category_floor_fraction=cell_params.guardrails.cash_constraint_category_floor_fraction,
+    )
+
+    return results, _guardrail_firing_report(guardrail_flags, cash_flags, category_floor_alert)
+
+
+def _preliminary_supplier_lists(
+    suppliers: pl.DataFrame,
+    *,
+    decisions: _ItemDecisions,
+    final_desired: dict[str, float],
+    guardrail_flags: dict[str, list[GuardrailFlag]],
+    cell_params: Params,
+    as_of: date,
+) -> dict[str, SupplierPurchaseList]:
+    """Consolida fornecedores na ordem dos itens, antes da restrição de caixa."""
     supplier_by_id = {row["supplier_id"]: row for row in suppliers.iter_rows(named=True)}
     items_by_supplier: dict[str, list[str]] = {}
     for item_id, supplier_id in decisions.supplier_of.items():
@@ -873,15 +935,15 @@ def generate_purchase_list(
         if supplier_list is not None:
             preliminary[supplier_id] = supplier_list
 
-    cycle_budget_rs = _cycle_budget_rs(
-        cell_params.guardrails.weekly_budget_rs, cell_params.purchase_list.budget_period_days
-    )
-    results, cash_flags, category_floor_alert = _finalize_with_cash_constraint(
-        preliminary,
-        budget_rs=cycle_budget_rs,
-        category_floor_fraction=cell_params.guardrails.cash_constraint_category_floor_fraction,
-    )
+    return preliminary
 
+
+def _guardrail_firing_report(
+    guardrail_flags: dict[str, list[GuardrailFlag]],
+    cash_flags: tuple[GuardrailFlag, ...],
+    category_floor_alert: CategoryFloorAlert | None,
+) -> GuardrailFiringReport:
+    """Conta as guardas por motivo e registra também os motivos sem disparos."""
     counts: Counter[GuardrailReason] = Counter()
     for flags in guardrail_flags.values():
         counts.update(f.reason for f in flags)
@@ -889,12 +951,11 @@ def generate_purchase_list(
     for reason in GuardrailReason:
         counts.setdefault(reason, 0)
 
-    report = GuardrailFiringReport(
+    return GuardrailFiringReport(
         counts=dict(counts),
         not_implemented=NOT_IMPLEMENTED_GUARDRAILS,
         category_floor_alert=category_floor_alert,
     )
-    return results, report
 
 
 # --------------------------------------------------------------------------
@@ -1024,6 +1085,29 @@ def write_supplier_workbook(
         empty_note=exceptions_empty_note,
     )
 
+    _write_workbook_notes(
+        workbook,
+        supplier_list,
+        as_of=as_of,
+        params=params,
+        supplier=supplier,
+        note_format=note_format,
+    )
+
+    workbook.close()
+    return path
+
+
+def _write_workbook_notes(
+    workbook: xlsxwriter.Workbook,
+    supplier_list: SupplierPurchaseList,
+    *,
+    as_of: date,
+    params: Params,
+    supplier: Supplier,
+    note_format: object,
+) -> None:
+    """Grava as notas com os mesmos textos e a mesma ordem das premissas."""
     notes_sheet = workbook.add_worksheet("Notas")
     notes_sheet.set_column(0, 0, 110)
     min_order_note = (
@@ -1049,9 +1133,6 @@ def write_supplier_workbook(
     for r, text in enumerate(notes):
         notes_sheet.write(r, 0, text, note_format)
         notes_sheet.set_row(r, 34)
-
-    workbook.close()
-    return path
 
 
 def write_all_workbooks(

@@ -400,7 +400,9 @@ def run_arm(
         horizon_days = horizon_by_item[item_id]
 
         if arm.forecaster == "quantile_gbm":
-            assert quantile_gbm_predictions is not None
+            if quantile_gbm_predictions is None:
+                msg = "As previsões do braço quantile_gbm devem estar disponíveis."
+                raise ValueError(msg)
             forecaster: Forecaster = QuantileGbmForecaster(
                 item_id=item_id,
                 expected_horizon=horizon_days,
