@@ -23,7 +23,7 @@ dev = [
     "ruff==0.16.6",
     "mypy==2.3.1",
     "types-PyYAML==6.0.12.20260906",
-    "jupyterlab==4.6.3",
+    "jupyterlab==4.6.4",
 ]
 
 [build-system]
@@ -94,3 +94,7 @@ markers = [
 
 [tool.coverage.run]
 source = ["src/motor"]
+
+[tool.coverage.report]
+# Piso 1 ponto abaixo da cobertura medida na Sprint 25, para tolerar variações pequenas.
+fail_under = 85

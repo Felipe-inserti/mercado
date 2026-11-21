@@ -52,7 +52,6 @@ import json
 import os
 import time
 from collections.abc import Sequence
-from dataclasses import dataclass
 from datetime import timedelta
 from pathlib import Path
 from typing import Any, Final
@@ -61,11 +60,13 @@ import polars as pl
 
 from motor.config import Params, load_params
 from motor.experiments.run import ArmRunResult, run_arm
-from motor.experiments.sensitivity import (
-    build_directed_cell_params,
-    override_supplier_lead_time,
-    override_supplier_review_period,
-)
+from motor.experiments.sensitivity import build_directed_cell_params
+from motor.io import canonical, supplier_overrides
+
+CanonicalTables = canonical.CanonicalTables
+load_canonical_tables = canonical.load_canonical_tables
+override_supplier_lead_time = supplier_overrides.override_supplier_lead_time
+override_supplier_review_period = supplier_overrides.override_supplier_review_period
 
 CELL_LEAD_TIME_DAYS: Final[int] = 7
 CELL_REVIEW_PERIOD_DAYS: Final[int] = 14
@@ -104,48 +105,19 @@ mostram inversão do gap contra o baseline, então a imprecisão não muda a
 conclusão qualitativa (ver README.md)."""
 
 
-@dataclass(frozen=True)
-class CanonicalTables:
-    """As quatro tabelas canônicas mais o cache de seleção de subconjunto --
-    agrupadas porque toda função deste módulo que roda uma célula precisa
-    das cinco juntas."""
-
-    sales: pl.LazyFrame
-    items: pl.DataFrame
-    suppliers: pl.DataFrame
-    stock: pl.DataFrame
-    subset_cache_path: Path
-
-
-def load_canonical_tables(
-    params: Params, *, subset_cache_path: Path | None = None
-) -> CanonicalTables:
-    """Carrega as quatro tabelas canônicas de `params.data.canonical_dir`.
-
-    `subset_cache_path` default (`results/subset_selection.json`) é o mesmo
-    arquivo compartilhado por `motor.experiments.sensitivity` -- reusar o
-    cache já quente evita reselecionar o subconjunto.
-    """
-    canonical_dir = Path(params.data.canonical_dir)
-    return CanonicalTables(
-        sales=pl.scan_parquet(canonical_dir / "sales.parquet"),
-        items=pl.read_parquet(canonical_dir / "items.parquet"),
-        suppliers=pl.read_parquet(canonical_dir / "suppliers.parquet"),
-        stock=pl.read_parquet(canonical_dir / "stock.parquet"),
-        subset_cache_path=subset_cache_path or Path("results/subset_selection.json"),
-    )
-
-
 def cell_suppliers(
     suppliers: pl.DataFrame,
     *,
     lead_time_days: int = CELL_LEAD_TIME_DAYS,
     review_period_days: int = CELL_REVIEW_PERIOD_DAYS,
 ) -> pl.DataFrame:
-    """`suppliers` com lead_time/review_period sobrescritos para a célula --
-    mesmas duas funções de `motor.experiments.sensitivity`, compostas."""
-    return override_supplier_review_period(
-        override_supplier_lead_time(suppliers, lead_time_days), review_period_days
+    """Compatibilidade da célula experimental com seus defaults históricos.
+
+    A composição vive em `motor.io.supplier_overrides`; só os defaults da
+    célula medida continuam nesta camada, sem entrar no produto.
+    """
+    return supplier_overrides.cell_suppliers(
+        suppliers, lead_time_days=lead_time_days, review_period_days=review_period_days
     )
 
 

@@ -2,17 +2,11 @@
 Sprint 17): um xlsx por fornecedor, para uma data de decisão dentro do
 período simulado.
 
-Braço 2 (estatístico + nível-alvo) em `alpha=0,66` -- o iso-serviço medido
-na Etapa 3.12, célula `lead_time=7`/`review_period=14` (`motor.experiments.
-iso_service`). Não o braço 3: a vantagem do braço 3 sobre o 2 é pequena e a
-grade dele é mais grosseira (ver `results/iso_servico/README.md`); para a
-peça de venda, o modelo simples, auditável e sem retreino semanal é o que
-faz sentido mostrar -- argumento de produto, não concessão. `alpha=0,66` só
-foi validado NESTA janela de risco (lt=7/rp=14); por isso este módulo
-sobrescreve `suppliers` para a mesma célula, em vez de usar o lead_time/
-review_period real do canônico (lt=3/rp=7) -- usar o alpha calibrado numa
-janela diferente da que ele foi medido seria uma combinação nova, nunca
-testada.
+Braço 2 (estatístico + nível-alvo), com alpha e prazos explícitos em
+`Params.purchase_list`. Os valores atuais foram herdados do iso-serviço da
+Etapa 3.12; revisá-los com dado real é decisão de negócio. Override `None`
+usa o prazo de cada fornecedor do cadastro. A grade de quantis original de
+`Params` permanece intacta: a decisão solicita só o alpha da lista.
 
 ORDEM DE APLICAÇÃO (fixa, não reordenar sem reabrir o desenho)
 --------------------------------------------------------------
@@ -92,7 +86,7 @@ import argparse
 import statistics
 from collections import Counter
 from dataclasses import dataclass, replace
-from datetime import date, timedelta
+from datetime import date, datetime, time, timedelta
 from pathlib import Path
 from typing import Any, Final
 
@@ -100,19 +94,11 @@ import polars as pl
 import xlsxwriter
 
 from motor.config import Params, load_params
-from motor.experiments.iso_service import (
-    ARM2_CHOSEN_ALPHA,
-    CELL_REVIEW_PERIOD_DAYS,
-    CanonicalTables,
-    build_arm2_single_alpha_params,
-    cell_suppliers,
-    load_canonical_tables,
-)
-from motor.experiments.run import load_or_select_subset
-from motor.experiments.shared import build_simulator_for_pair
 from motor.features.censoring import drop_censored, flags_for_item, flags_if_active
 from motor.forecast.statistical import StatisticalForecaster
+from motor.io.canonical import CanonicalTables, load_canonical_tables
 from motor.io.contracts import Supplier
+from motor.io.supplier_overrides import cell_suppliers
 from motor.policy.base import DecisionContext
 from motor.policy.basestock import BasestockPolicy
 from motor.policy.guardrails import (
@@ -131,8 +117,11 @@ from motor.policy.supplier import (
     AdjustmentReason,
     ItemPurchaseInfo,
     OrderOutcome,
+    SupplierOrderResult,
     apply_supplier_constraints,
 )
+from motor.selection_cache import load_or_select_subset
+from motor.simulator.pair import build_simulator_for_pair
 
 _TRAILING_DEMAND_WINDOW_DAYS: Final[int] = 28
 """Janela de demanda diária esperada usada pra cobertura em dias e pro
@@ -217,16 +206,11 @@ CASH_CONSTRAINT_CATEGORY_FLOOR_NOTE: Final[str] = (
 )
 
 RISK_WINDOW_ARCHITECTURE_LIMITATION_NOTE: Final[str] = (
-    "O teto de cobertura só é uma guarda ATIVA quando a janela de risco (lead_time + "
-    "review_period) é menor que a validade da família -- quando a janela é MAIOR (caso "
-    "de perecível fresco/giro rápido nesta célula, ver Etapa 3.16.2), o teto efetivo "
-    "vira a própria janela, e a guarda para de proteger contra excesso: ela só evita "
-    "que o pedido peça MENOS que o mínimo estrutural, não pode evitar pedir mais que a "
-    "validade permite. Em famílias assim, a proteção real teria que vir de um "
-    "review_period MENOR, por fornecedor -- que o simulador hoje não suporta (é global "
-    "para toda a simulação, motor.experiments.shared). Isto é DÉBITO DE ARQUITETURA, "
-    "não bug: medir com uma janela de risco única penaliza estruturalmente a família "
-    "onde o motor mais teria a ganhar (perecível, giro rápido)."
+    "O teto efetivo é o maior entre a validade da família e a janela de risco do "
+    "fornecedor. Quando a janela supera a validade, o teto admite estoque além da "
+    "validade física; o motivo da exceção registra essa incompatibilidade. Os prazos "
+    "efetivos estão na nota de configuração. Revisar o ciclo de compra por fornecedor "
+    "com o dado real é decisão de negócio."
 )
 
 DESCRIPTION_MISSING_NOTE: Final[str] = (
@@ -236,12 +220,33 @@ DESCRIPTION_MISSING_NOTE: Final[str] = (
     "descrição foi inventada."
 )
 
-ALPHA_CELL_MISMATCH_NOTE: Final[str] = (
-    "alpha=0,66 foi calibrado (Etapa 3.12) na célula lead_time=7/review_period=14 -- "
-    "esta lista roda NESSA célula (suppliers sobrescritos), não no lead_time=3/"
-    "review_period=7 real do canônico. Usar este alpha numa janela de risco diferente "
-    "seria uma combinação nova, nunca medida."
-)
+
+def _purchase_list_suppliers(suppliers: pl.DataFrame, params: Params) -> pl.DataFrame:
+    """Aplica só os overrides explícitos; `None` mantém o cadastro por fornecedor."""
+    return cell_suppliers(
+        suppliers,
+        lead_time_days=params.purchase_list.lead_time_days_override,
+        review_period_days=params.purchase_list.review_period_days_override,
+    )
+
+
+def _purchase_list_configuration_note(params: Params, supplier: Supplier) -> str:
+    """Descreve alpha, prazos efetivos e origem de cada prazo exibido no Excel."""
+    config = params.purchase_list
+    lead = config.lead_time_days_override
+    review = config.review_period_days_override
+    lead_origin = "cadastro do fornecedor" if lead is None else "override da lista"
+    review_origin = "cadastro do fornecedor" if review is None else "override da lista"
+    effective_lead = supplier.lead_time_days if lead is None else lead
+    effective_review = supplier.review_period_days if review is None else review
+    return (
+        f"Configuração da lista (config/params.yaml, purchase_list): alpha={config.alpha:g}; "
+        f"lead_time={effective_lead} dias ({lead_origin}); "
+        f"review_period={effective_review} dias ({review_origin}); "
+        f"janela de risco={effective_lead + effective_review} dias. "
+        "Os valores iniciais da lista foram herdados do iso-serviço da Etapa 3.12; "
+        "alterar alpha ou prazos exige revisão com o dado real, sem recalibração automática."
+    )
 
 
 @dataclass(frozen=True)
@@ -302,10 +307,10 @@ def _trailing_avg_daily_demand(history: pl.DataFrame, as_of: date) -> float:
     return float(window["units_sold"].mean())  # type: ignore[arg-type]
 
 
-def _cycle_budget_rs(weekly_budget_rs: float, review_period_days: int) -> float:
+def _cycle_budget_rs(weekly_budget_rs: float, budget_period_days: int) -> float:
     """Converte `weekly_budget_rs` (premissa SEMANAL, config/params.yaml)
-    para o orçamento do CICLO desta decisão (`review_period_days` dias) --
-    `weekly_budget_rs * review_period_days / 7`.
+    para o orçamento do CICLO desta decisão (`budget_period_days` dias) --
+    `weekly_budget_rs * budget_period_days / 7`, independente da revisão.
 
     Bug corrigido na Etapa 3.16.3: até aqui, `generate_purchase_list`
     passava `weekly_budget_rs` direto como orçamento do ciclo de 14 dias
@@ -316,7 +321,7 @@ def _cycle_budget_rs(weekly_budget_rs: float, review_period_days: int) -> float:
     valer R$400k/500k). Erro de implementação meu, não do valor arbitrado
     pelo usuário -- documentado aqui, não escondido.
     """
-    return weekly_budget_rs * review_period_days / 7
+    return weekly_budget_rs * budget_period_days / 7
 
 
 def _coverage_days(position_after_order: float, expected_daily_demand: float) -> float | None:
@@ -354,7 +359,9 @@ def _first_sale_and_days_with_sales(demand: pl.DataFrame, as_of: date) -> tuple[
     if sold_days.height == 0:
         return None, 0
     first_sale = sold_days["date"].min()
-    assert isinstance(first_sale, date)
+    if not isinstance(first_sale, date):
+        msg = "A primeira data de venda deve ser uma data válida."
+        raise TypeError(msg)
     return first_sale, sold_days.height
 
 
@@ -397,9 +404,8 @@ def _decide_item(
         seasonal_window_weeks=cell_params.forecast_statistical.seasonal_window_weeks,
         min_residual_samples=cell_params.forecast_statistical.min_residual_samples,
     )
-    policy = BasestockPolicy(
-        alpha=ARM2_CHOSEN_ALPHA, expected_window_days=lead_time_days + review_period_days
-    )
+    alpha = cell_params.purchase_list.alpha
+    policy = BasestockPolicy(alpha=alpha, expected_window_days=lead_time_days + review_period_days)
     simulator = build_simulator_for_pair(
         demand=demand,
         forecaster=forecaster,
@@ -408,7 +414,7 @@ def _decide_item(
         review_period_days=review_period_days,
         start=cell_params.simulation.start_date,
         warmup_days=cell_params.simulation.warmup_days,
-        quantiles=cell_params.model.quantiles,
+        quantiles=[alpha],
         censoring_flags=censoring_flags,
     )
     events = simulator.run(cell_params.simulation.start_date, as_of - timedelta(days=1))
@@ -426,9 +432,7 @@ def _decide_item(
     if censoring_flags is not None:
         history = drop_censored(history, censoring_flags)
     forecaster.fit(history, as_of=as_of)
-    forecast = forecaster.predict_quantiles(
-        as_of, lead_time_days + review_period_days, [ARM2_CHOSEN_ALPHA]
-    )
+    forecast = forecaster.predict_quantiles(as_of, lead_time_days + review_period_days, [alpha])
     ctx = DecisionContext(as_of=as_of, on_hand=on_hand, in_transit=in_transit, forecast=forecast)
     raw_quantity = policy.order(ctx)
 
@@ -634,16 +638,7 @@ def _build_supplier_list(
     A restrição de caixa (regra 3) NÃO é aplicada aqui -- roda depois,
     sobre o portfólio inteiro (`_finalize_with_cash_constraint`).
     """
-    categories = {decisions.category_of[item_id] for item_id in supplier_item_ids}
-    if len(categories) != 1:
-        msg = (
-            f"fornecedor {supplier_id!r} tem itens de categorias diferentes "
-            f"({sorted(categories)}) -- _min_order_value_for assume uma categoria só "
-            "por fornecedor, verdade no dataset atual (supplier_id=SUP-<CATEGORY>); "
-            "isso quebrou."
-        )
-        raise ValueError(msg)
-    category = next(iter(categories))
+    category = _supplier_category(supplier_id, supplier_item_ids, decisions)
 
     supplier = Supplier(
         supplier_id=supplier_id,
@@ -677,6 +672,52 @@ def _build_supplier_list(
         ),
     )
 
+    main_rows, exception_rows = _supplier_purchase_rows(
+        supplier_item_ids,
+        order_result=order_result,
+        decisions=decisions,
+        supplier_purchase_info=supplier_purchase_info,
+        supplier_position=supplier_position,
+        supplier_daily_demand=supplier_daily_demand,
+        guardrail_flags=guardrail_flags,
+    )
+    return SupplierPurchaseList(
+        supplier_id=supplier_id,
+        category=category,
+        outcome=order_result.outcome,
+        min_order_value=supplier.min_order_value,
+        main=tuple(main_rows),
+        exceptions=tuple(exception_rows),
+    )
+
+
+def _supplier_category(
+    supplier_id: str, supplier_item_ids: list[str], decisions: _ItemDecisions
+) -> str:
+    """Valida a categoria única exigida pela premissa de mínimo do fornecedor."""
+    categories = {decisions.category_of[item_id] for item_id in supplier_item_ids}
+    if len(categories) != 1:
+        msg = (
+            f"fornecedor {supplier_id!r} tem itens de categorias diferentes "
+            f"({sorted(categories)}) -- _min_order_value_for assume uma categoria só "
+            "por fornecedor, verdade no dataset atual (supplier_id=SUP-<CATEGORY>); "
+            "isso quebrou."
+        )
+        raise ValueError(msg)
+    return next(iter(categories))
+
+
+def _supplier_purchase_rows(
+    supplier_item_ids: list[str],
+    *,
+    order_result: SupplierOrderResult,
+    decisions: _ItemDecisions,
+    supplier_purchase_info: dict[str, ItemPurchaseInfo],
+    supplier_position: dict[str, float],
+    supplier_daily_demand: dict[str, float],
+    guardrail_flags: dict[str, list[GuardrailFlag]],
+) -> tuple[list[PurchaseListRow], list[PurchaseListRow]]:
+    """Monta linhas principais e exceções na ordem dos códigos dos itens."""
     adjustments_by_item: dict[str, list[AdjustmentReason]] = {}
     for adj in order_result.adjustments:
         adjustments_by_item.setdefault(adj.item_id, []).append(adj.reason)
@@ -712,14 +753,7 @@ def _build_supplier_list(
         )
         (exception_rows if is_exception else main_rows).append(row)
 
-    return SupplierPurchaseList(
-        supplier_id=supplier_id,
-        category=category,
-        outcome=order_result.outcome,
-        min_order_value=supplier.min_order_value,
-        main=tuple(main_rows),
-        exceptions=tuple(exception_rows),
-    )
+    return main_rows, exception_rows
 
 
 def _finalize_with_cash_constraint(
@@ -801,8 +835,8 @@ def generate_purchase_list(
     `as_of`, com as quatro regras de guarda ativas (Etapa 3.16). Fornecedor
     fora do calendário de pedido hoje (`OrderOutcome.FORA_DO_CALENDARIO`)
     não entra no dict -- ausência, não exceção."""
-    cell_params = build_arm2_single_alpha_params(base_params, ARM2_CHOSEN_ALPHA)
-    suppliers = cell_suppliers(tables.suppliers)
+    cell_params = base_params
+    suppliers = _purchase_list_suppliers(tables.suppliers, base_params)
 
     subset = load_or_select_subset(
         tables.sales,
@@ -850,6 +884,37 @@ def generate_purchase_list(
         decisions, is_new=is_new, cell_params=cell_params
     )
 
+    preliminary = _preliminary_supplier_lists(
+        suppliers,
+        decisions=decisions,
+        final_desired=final_desired,
+        guardrail_flags=guardrail_flags,
+        cell_params=cell_params,
+        as_of=as_of,
+    )
+
+    cycle_budget_rs = _cycle_budget_rs(
+        cell_params.guardrails.weekly_budget_rs, cell_params.purchase_list.budget_period_days
+    )
+    results, cash_flags, category_floor_alert = _finalize_with_cash_constraint(
+        preliminary,
+        budget_rs=cycle_budget_rs,
+        category_floor_fraction=cell_params.guardrails.cash_constraint_category_floor_fraction,
+    )
+
+    return results, _guardrail_firing_report(guardrail_flags, cash_flags, category_floor_alert)
+
+
+def _preliminary_supplier_lists(
+    suppliers: pl.DataFrame,
+    *,
+    decisions: _ItemDecisions,
+    final_desired: dict[str, float],
+    guardrail_flags: dict[str, list[GuardrailFlag]],
+    cell_params: Params,
+    as_of: date,
+) -> dict[str, SupplierPurchaseList]:
+    """Consolida fornecedores na ordem dos itens, antes da restrição de caixa."""
     supplier_by_id = {row["supplier_id"]: row for row in suppliers.iter_rows(named=True)}
     items_by_supplier: dict[str, list[str]] = {}
     for item_id, supplier_id in decisions.supplier_of.items():
@@ -870,15 +935,15 @@ def generate_purchase_list(
         if supplier_list is not None:
             preliminary[supplier_id] = supplier_list
 
-    cycle_budget_rs = _cycle_budget_rs(
-        cell_params.guardrails.weekly_budget_rs, CELL_REVIEW_PERIOD_DAYS
-    )
-    results, cash_flags, category_floor_alert = _finalize_with_cash_constraint(
-        preliminary,
-        budget_rs=cycle_budget_rs,
-        category_floor_fraction=cell_params.guardrails.cash_constraint_category_floor_fraction,
-    )
+    return preliminary
 
+
+def _guardrail_firing_report(
+    guardrail_flags: dict[str, list[GuardrailFlag]],
+    cash_flags: tuple[GuardrailFlag, ...],
+    category_floor_alert: CategoryFloorAlert | None,
+) -> GuardrailFiringReport:
+    """Conta as guardas por motivo e registra também os motivos sem disparos."""
     counts: Counter[GuardrailReason] = Counter()
     for flags in guardrail_flags.values():
         counts.update(f.reason for f in flags)
@@ -886,12 +951,11 @@ def generate_purchase_list(
     for reason in GuardrailReason:
         counts.setdefault(reason, 0)
 
-    report = GuardrailFiringReport(
+    return GuardrailFiringReport(
         counts=dict(counts),
         not_implemented=NOT_IMPLEMENTED_GUARDRAILS,
         category_floor_alert=category_floor_alert,
     )
-    return results, report
 
 
 # --------------------------------------------------------------------------
@@ -962,7 +1026,12 @@ def _write_rows_sheet(
 
 
 def write_supplier_workbook(
-    supplier_list: SupplierPurchaseList, *, as_of: date, out_dir: Path
+    supplier_list: SupplierPurchaseList,
+    *,
+    as_of: date,
+    out_dir: Path,
+    params: Params,
+    supplier: Supplier,
 ) -> Path:
     """Grava um xlsx com três abas: Lista principal, Exceções, Notas.
 
@@ -974,6 +1043,7 @@ def write_supplier_workbook(
     out_dir.mkdir(parents=True, exist_ok=True)
     path = out_dir / f"{supplier_list.supplier_id}.xlsx"
     workbook = xlsxwriter.Workbook(str(path))
+    workbook.set_properties({"created": datetime.combine(as_of, time.min)})
 
     header_format = workbook.add_format(
         {"bold": True, "bg_color": "#1f3864", "font_color": "white", "border": 1}
@@ -1015,6 +1085,29 @@ def write_supplier_workbook(
         empty_note=exceptions_empty_note,
     )
 
+    _write_workbook_notes(
+        workbook,
+        supplier_list,
+        as_of=as_of,
+        params=params,
+        supplier=supplier,
+        note_format=note_format,
+    )
+
+    workbook.close()
+    return path
+
+
+def _write_workbook_notes(
+    workbook: xlsxwriter.Workbook,
+    supplier_list: SupplierPurchaseList,
+    *,
+    as_of: date,
+    params: Params,
+    supplier: Supplier,
+    note_format: object,
+) -> None:
+    """Grava as notas com os mesmos textos e a mesma ordem das premissas."""
     notes_sheet = workbook.add_worksheet("Notas")
     notes_sheet.set_column(0, 0, 110)
     min_order_note = (
@@ -1024,9 +1117,8 @@ def write_supplier_workbook(
     notes = [
         f"Fornecedor: {supplier_list.supplier_id} -- data de decisão: {as_of.isoformat()} "
         f"-- resultado do pedido: {_OUTCOME_LABELS[supplier_list.outcome]}.",
-        f"Política: braço 2 (estatístico + nível-alvo), alpha={ARM2_CHOSEN_ALPHA} "
-        "(iso-serviço, Etapa 3.12).",
-        ALPHA_CELL_MISMATCH_NOTE,
+        f"Política: braço 2 (estatístico + nível-alvo), alpha={params.purchase_list.alpha:g}.",
+        _purchase_list_configuration_note(params, supplier),
         REALISTIC_SUPPLIER_ASSUMPTIONS_NOTE,
         min_order_note,
         GUARDRAILS_NOTE,
@@ -1042,15 +1134,26 @@ def write_supplier_workbook(
         notes_sheet.write(r, 0, text, note_format)
         notes_sheet.set_row(r, 34)
 
-    workbook.close()
-    return path
-
 
 def write_all_workbooks(
-    results: dict[str, SupplierPurchaseList], *, as_of: date, out_dir: Path
+    results: dict[str, SupplierPurchaseList],
+    *,
+    as_of: date,
+    out_dir: Path,
+    params: Params,
+    suppliers: pl.DataFrame,
 ) -> list[Path]:
+    supplier_by_id = {
+        row["supplier_id"]: Supplier(**row) for row in suppliers.iter_rows(named=True)
+    }
     return [
-        write_supplier_workbook(supplier_list, as_of=as_of, out_dir=out_dir)
+        write_supplier_workbook(
+            supplier_list,
+            as_of=as_of,
+            out_dir=out_dir,
+            params=params,
+            supplier=supplier_by_id[supplier_list.supplier_id],
+        )
         for supplier_list in results.values()
     ]
 
@@ -1080,20 +1183,22 @@ def main(argv: list[str] | None = None) -> None:
 
     base_params = load_params(args.params)
     if args.weekly_budget_rs is not None:
-        base_params = base_params.model_copy(
-            update={
-                "guardrails": base_params.guardrails.model_copy(
-                    update={"weekly_budget_rs": args.weekly_budget_rs}
-                )
-            }
-        )
+        payload = base_params.model_dump()
+        payload["guardrails"]["weekly_budget_rs"] = args.weekly_budget_rs
+        base_params = Params.model_validate(payload)
         print(
             "CENÁRIO DE ESTRESSE: weekly_budget_rs sobrescrito para "
             f"R$ {args.weekly_budget_rs:,.2f}"
         )
     tables = load_canonical_tables(base_params)
     results, report = generate_purchase_list(args.as_of, base_params=base_params, tables=tables)
-    paths = write_all_workbooks(results, as_of=args.as_of, out_dir=args.output_dir)
+    paths = write_all_workbooks(
+        results,
+        as_of=args.as_of,
+        out_dir=args.output_dir,
+        params=base_params,
+        suppliers=tables.suppliers,
+    )
 
     n_exceptions = sum(len(r.exceptions) for r in results.values())
     print(

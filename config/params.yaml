@@ -285,6 +285,12 @@ purchase_list_supplier_assumptions:
     BOOKS: 2000.0
     "HOME APPLIANCES": 2000.0
 
+purchase_list:
+  alpha: 0.66 # valor atual: ARM2_CHOSEN_ALPHA (iso-serviço, Etapa 3.12, célula lt=7/rp=14); revisar com o dado real
+  lead_time_days_override: 7 # valor atual: célula da Etapa 3.12. null = usar o lead_time_days do cadastro do fornecedor
+  review_period_days_override: 14 # valor atual: célula da Etapa 3.12. null = usar o review_period_days do cadastro do fornecedor
+  budget_period_days: 14 # valor atual: CELL_REVIEW_PERIOD_DAYS; período do orçamento por ciclo (weekly_budget_rs x dias/7)
+
 economics:
   capital_cost_annual: 0.15 # arbitrado: custo de capital anualizado plausível para varejo pequeno/médio no Brasil
   # Sprint 8: preço único por unidade vendida, aplicado a TODO item -- o Favorita não

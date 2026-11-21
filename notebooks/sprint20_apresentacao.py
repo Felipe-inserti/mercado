@@ -63,7 +63,7 @@ from matplotlib.backends.backend_pdf import PdfPages
 from matplotlib.patches import FancyBboxPatch
 
 from motor.experiments.iso_service import CELL_LEAD_TIME_DAYS, CELL_REVIEW_PERIOD_DAYS
-from motor.reporting.monthly_report import (
+from motor.experiments.monthly_report import (
     STALE_LABEL_HEADLINE,
     load_motor_financials,
     load_recalibrado_financials,

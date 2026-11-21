@@ -1,0 +1,3 @@
+supplier_id,lead_time_days,order_days,review_period_days,min_order_value,min_order_units
+FICT-GROCERY,2,"[1,4]",7,0.0,0.0
+FICT-PRODUCE,3,"[2,5]",7,0.0,0.0

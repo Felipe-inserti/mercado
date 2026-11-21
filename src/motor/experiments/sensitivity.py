@@ -92,7 +92,11 @@ import motor.experiments.run as run_module
 import motor.forecast.quantile_gbm as qgbm_module
 from motor.config import Params, load_params
 from motor.experiments.run import RunManifest, run_arm_and_save
+from motor.io import supplier_overrides
 from motor.policy.erp_calibration import CalibrationItem, CalibrationResult, sweep_erp_baseline
+
+override_supplier_lead_time = supplier_overrides.override_supplier_lead_time
+override_supplier_review_period = supplier_overrides.override_supplier_review_period
 
 LEAD_TIMES: Final[tuple[int, ...]] = (3, 4, 6, 8, 10)
 ALPHAS: Final[tuple[float, ...]] = (0.70, 0.80, 0.85, 0.90, 0.95)
@@ -117,28 +121,6 @@ _PROBE_PLAN: Final[tuple[tuple[str, int, float], ...]] = (
 
 _BUDGET_SECONDS: Final[float] = 4 * 3600  # ~4h, teto do enunciado da sprint
 _CACHE_HIT_THRESHOLD_SECONDS: Final[float] = 60.0  # acima disso, não é "carregar do disco"
-
-
-def override_supplier_lead_time(suppliers: pl.DataFrame, lead_time_days: int) -> pl.DataFrame:
-    """Sobrescreve `lead_time_days` para TODOS os fornecedores do
-    subconjunto. Único jeito de variar o eixo lead_time sem tocar
-    `motor.io.loaders` -- hoje já é uniforme (3, vindo do default de
-    `supplier_assumptions`, ver params.yaml), então não há uma distribuição
-    real por fornecedor para preservar."""
-    return suppliers.with_columns(pl.lit(lead_time_days).cast(pl.Int64).alias("lead_time_days"))
-
-
-def override_supplier_review_period(
-    suppliers: pl.DataFrame, review_period_days: int
-) -> pl.DataFrame:
-    """Sobrescreve `review_period_days` para TODOS os fornecedores do
-    subconjunto -- simétrico a `override_supplier_lead_time` (Etapa 3.4/3.5,
-    Sprint 16.5). Sozinho isto NÃO basta para o braço 3: `build_cell_params`
-    (abaixo) amarra `model.retrain_cadence_days` ao mesmo valor -- ver
-    docstring de `build_cell_params` para o porquê."""
-    return suppliers.with_columns(
-        pl.lit(review_period_days).cast(pl.Int64).alias("review_period_days")
-    )
 
 
 def build_cell_params(

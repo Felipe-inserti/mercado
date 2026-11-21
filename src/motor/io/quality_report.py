@@ -267,7 +267,9 @@ def _check_receipt_before_order(entries: pl.DataFrame) -> pl.DataFrame:
 def _active_items(sales: pl.DataFrame, window_days: int) -> pl.DataFrame:
     """Itens com venda (`units_sold > 0`) nos últimos `window_days` dias do `sales`."""
     last_day = sales["date"].max()
-    assert isinstance(last_day, date)
+    if not isinstance(last_day, date):
+        msg = "sales.date deve conter uma data válida para identificar os itens ativos."
+        raise TypeError(msg)
     start = last_day - timedelta(days=window_days - 1)
     return (
         sales.filter((pl.col("date") >= start) & (pl.col("units_sold") > 0))

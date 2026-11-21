@@ -1,0 +1,3 @@
+item_id,ean,description,category,item_class,supplier_id,unit_of_sale,pack_multiple,is_perishable,is_anchor,cost,price_ref,economics_origin
+FICT-ARROZ,,Arroz de exemplo fictício,GROCERY I,,FICT-GROCERY,unidade,6.0,false,,3.5,5.0,exemplo_ficticio
+FICT-TOMATE,,Tomate de exemplo fictício,PRODUCE,,FICT-PRODUCE,kg,1.0,true,,2.0,3.0,exemplo_ficticio

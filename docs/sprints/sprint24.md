@@ -215,7 +215,8 @@ Roda sobre as tabelas canônicas, então não depende do formato do mercado.
 
 ### Pendências antes do piloto
 
-- **[OBRIGATÓRIA] `ARM2_CHOSEN_ALPHA` fora da grade de quantis.** `experiments/iso_service.py` define `ARM2_CHOSEN_ALPHA = 0.66`, que não está em `model.quantiles` do `params.yaml` (`[0.5, 0.7, 0.8, 0.85, 0.9, 0.95]`). A decisão por item da lista de compra (`reporting/purchase_list.py::_decide_item`) levanta `ValueError` (alpha fora da grade) com o `params.yaml` atual, então a lista de compra não roda. Não corrigido na Sprint 24, por decisão explícita. Registrado em `tests/test_purchase_list.py` por um teste `xfail(strict=True)`: quando o bug for corrigido o teste passa, o `strict` o derruba, e o `xfail` deve ser removido.
+- **[RESOLVIDA na Sprint 25] Alpha da lista de compra.** A lista rodava presa à célula lt=7/rp=14 via `model_copy`, que contornava a validação; a afirmação anterior de que ela não rodava era imprecisa. Agora alpha e prazos vêm explicitamente de `purchase_list` no `params.yaml`, sem alterar a grade global de quantis; override `null` usa o cadastro de cada fornecedor.
+- **[PENDENTE] Etapa 24.7.** `src/motor/experiments/piloto_backtest.py` não está no repositório. A descrição e o “Pronto” abaixo registram o escopo pretendido da Sprint 24, não comprovam sua implementação. Fase 12 da Sprint 25 excluída por decisão do Rafael; Felipe deve confirmar o estado desse trabalho antes de retomá-lo.
 - Alvo de treino do GBM (braço 3) não é censurado; fora da v1.
 - **[OBRIGATÓRIA] Refazer a comparação de braços e iso-serviço com o baseline recalibrado.** Atualizar os números relativos (capital, nível de serviço, margem) do relatório, do PDF e do documento de negócio antes de mostrar ao investidor.
 

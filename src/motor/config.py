@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Annotated, Any, ClassVar
 
 import yaml
-from annotated_types import Ge, Gt, Le, MinLen
+from annotated_types import Ge, Gt, Le, Lt, MinLen
 from pydantic import BaseModel, ConfigDict, model_validator
 
 NonNegativeFloat = Annotated[float, Ge(0.0)]
@@ -225,6 +225,20 @@ class PurchaseListSupplierAssumptionsParams(ParamsSection):
 
     pack_multiple_by_category: dict[str, PositiveFloat]
     min_order_value_by_category: dict[str, NonNegativeFloat]
+
+
+class PurchaseListParams(ParamsSection):
+    """Configuração da lista de compra, independente dos experimentos.
+
+    Overrides `None` preservam os prazos de cada fornecedor do cadastro.
+    O orçamento tem período próprio, independente da cadência de revisão.
+    Alpha é explícito: não precisa pertencer à grade de outros consumidores.
+    """
+
+    alpha: Annotated[float, Gt(0.0), Lt(1.0)]
+    lead_time_days_override: PositiveInt | None
+    review_period_days_override: PositiveInt | None
+    budget_period_days: PositiveInt
 
 
 class EconomicsParams(ParamsSection):
@@ -614,6 +628,7 @@ class Params(ParamsSection):
     supplier_assumptions: SupplierAssumptionsParams
     supplier_order_policy: SupplierOrderPolicyParams
     purchase_list_supplier_assumptions: PurchaseListSupplierAssumptionsParams
+    purchase_list: PurchaseListParams
     economics: EconomicsParams
     guardrails: GuardrailsParams
     features: FeaturesParams
